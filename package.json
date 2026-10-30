@@ -1,0 +1,31 @@
+{
+  "name": "pr-guide",
+  "version": "0.1.0",
+  "description": "A guided tour of a pull request, written by your own Claude or Codex",
+  "type": "module",
+  "bin": {
+    "pr-guide": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "node --test 'src/**/*.test.ts'",
+    "prepare": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "ink": "^8.0.0",
+    "react": "^19.3.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "typescript": "^7.0.2"
+  }
+}
