@@ -22,7 +22,8 @@ export const THEME = {
   strong: "#ffffff",
   text: "#d7dae0",
   muted: "#9da5b4",
-  faint: "#6f7683",
+  faint: "#8b93a1",
+  disabled: "#5c6370",
   accent: "#61afef",
   code: "#8bd5ca",
   codeChip: "#323844",
@@ -37,7 +38,7 @@ export const THEME = {
   noteBg: "#2c313a",
   addition: { sign: "#98c379", bg: "#263229" },
   deletion: { sign: "#e06c75", bg: "#36272b" },
-  syntax: { comment: "#a5adba", string: "#98c379", number: "#d19a66", keyword: "#c678dd", plain: undefined },
+  syntax: { comment: "#8f98a6", string: "#98c379", number: "#d19a66", keyword: "#c678dd", plain: undefined },
 } as const satisfies Record<string, unknown> & { syntax: Record<Token, string | undefined> };
 
 /** Prose wraps at a comfortable reading measure; code takes the full width. */
@@ -156,6 +157,8 @@ interface CodeBlock {
   readonly path: string;
   readonly segments: ReadonlyArray<ReadonlyArray<DiffRow>>;
   readonly side: Excerpt["side"];
+  /** Line-number width, shared by every block in a stop so code starts in one column. */
+  readonly gutter: number;
   /** Note markers by line on `side`, with the notes to draw under that line. */
   readonly notesAt?: ReadonlyMap<number, ReadonlyArray<{ marker: string; note: Note }>>;
 }
@@ -164,10 +167,9 @@ interface CodeBlock {
  * Diff rows on a dark code surface: a colored sign and line number mark changes, notes sit under their line.
  * A block that only adds lines skips the row tint, so a new file doesn't turn into a wall of green.
  */
-function codeLines({ path, segments, side, notesAt }: CodeBlock, total: number, measure: number): Array<Line> {
+function codeLines({ path, segments, side, gutter, notesAt }: CodeBlock, total: number, measure: number): Array<Line> {
   const numberOf = (row: DiffRow) =>
     row.kind === "addition" ? row.newLine : row.kind === "deletion" ? row.oldLine : side === "new" ? row.newLine : row.oldLine;
-  const gutter = Math.max(2, ...segments.flat().map((row) => String(numberOf(row) ?? "").length));
   const tinted = segments.flat().some((row) => row.kind !== "addition");
   // The marker lane is always there, so gutters line up from block to block.
   const lane = Math.max(4, ...[...(notesAt?.values() ?? [])].map((notes) => notes.length + 3));
@@ -213,35 +215,73 @@ function codeLines({ path, segments, side, notesAt }: CodeBlock, total: number, 
 /** A filled card with an amber rule: the shape of everything that asks for the reader's judgment. */
 function card(rows: ReadonlyArray<Line>, cardWidth: number, padded = true): Array<Line> {
   const fill = (line: Line): Line => pad(withBg([{ text: "┃ ", color: THEME.attention }, ...line], THEME.noteBg), cardWidth, THEME.noteBg);
-  return [...(padded ? [fill([])] : []), ...rows.map(fill), ...(padded ? [fill([])] : [])];
+  return [...(padded ? [fill([])] : []), ...rows.map(fill)];
 }
 
 /** A note drawn under the line it is about, like an inline review comment. */
 function noteCard(marker: string, note: Note, indent: number, total: number, measure: number): Array<Line> {
   const cardWidth = Math.min(measure, total - indent + 2);
   const body = note.body.trim() === "" ? [] : prose(note.body, cardWidth - 3);
-  const rows = card(
-    [[{ text: ` ${marker} `, color: "#1d1f21", bg: THEME.attention, bold: true }, { text: ` ${note.title}`, color: THEME.strong, bold: true }], ...body],
-    cardWidth,
-    false,
-  );
+  const rows = card([...markedTitle(marker, note.title, cardWidth - 3), ...body], cardWidth, false);
   return rows.map((line) => pad(withBg([{ text: " ".repeat(indent - 2) }, ...line], THEME.codeBg), total, THEME.codeBg));
 }
 
-function blockHeader(path: string, detail: string, counts: { additions: number; deletions: number } | null, total: number): Line {
-  const line: Line = [
-    { text: " " },
-    ...pathSpans(path, { bold: true }),
-    ...(detail ? [{ text: `  ${detail}`, color: THEME.muted }] : []),
-    ...(counts ? [{ text: "  " }, ...stats(counts)] : []),
-  ];
+/** A note's letter chip and title, the title wrapping under itself. */
+function markedTitle(marker: string, title: string, wrapAt: number): Array<Line> {
+  const chipText = ` ${marker} `;
+  const indent = " ".repeat(chipText.length + 1);
+  return prose(title, wrapAt, { color: THEME.strong, bold: true }, indent).map((line, i) =>
+    i === 0 ? [{ text: chipText, color: "#1d1f21", bg: THEME.attention, bold: true }, { text: " " }, ...line.slice(1)] : line,
+  );
+}
+
+/** Shortens a path from the left, keeping the file name, so a header never clips what it names. */
+function fitPath(path: string, room: number): string {
+  if (path.length <= room) return path;
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const dir = path.slice(0, path.length - name.length);
+  const keep = room - name.length - 2;
+  return keep > 0 ? `…/${dir.slice(dir.length - keep).replace(/^[^/]*\//, "")}${name}` : name;
+}
+
+function blockHeader(
+  path: string,
+  detail: string,
+  counts: { additions: number; deletions: number } | null,
+  total: number,
+  lead = " ",
+): Line {
+  const tail: Line = [...(detail ? [{ text: `  ${detail}`, color: THEME.muted }] : []), ...(counts ? [{ text: "  " }, ...stats(counts)] : [])];
+  const line: Line = [{ text: lead, color: THEME.muted }, ...pathSpans(fitPath(path, total - lead.length - width(tail) - 1), { bold: true }), ...tail];
   return pad(withBg(line, THEME.headerBg), total, THEME.headerBg);
+}
+
+/** Expanded files show this many rows, then point at the PR for the rest. */
+const FILE_ROWS = 40;
+
+function capRows(segments: ReadonlyArray<ReadonlyArray<DiffRow>>, limit: number) {
+  const kept: Array<ReadonlyArray<DiffRow>> = [];
+  let room = limit;
+  for (const rows of segments) {
+    if (room <= 0) break;
+    kept.push(rows.slice(0, room));
+    room -= rows.length;
+  }
+  return { kept, hidden: Math.max(-room, 0) + segments.slice(kept.length).flat().length };
 }
 
 const heading = (text: string, detail = ""): Line => [
   { text, color: THEME.strong, bold: true },
   ...(detail ? [{ text: `  ${detail}`, color: THEME.muted }] : []),
 ];
+
+function fileCode(file: DiffFile, gutter: number, total: number, measure: number): Array<Line> {
+  const { kept, hidden } = capRows(file.hunks.map((hunk) => hunk.rows), FILE_ROWS);
+  return [
+    ...codeLines({ path: file.path, segments: kept, side: "new", gutter }, total, measure),
+    ...(hidden > 0 ? [pad(withBg([{ text: `${" ".repeat(gutter + 4)}⋯ ${hidden} more lines in the PR`, color: THEME.faint }], THEME.codeBg), total, THEME.codeBg)] : []),
+  ];
+}
 
 export interface StopView {
   readonly stop: Stop;
@@ -257,6 +297,13 @@ export function stopLines({ stop, isLast, nextTitle, files, showFileDiffs }: Sto
   const blocks: Array<{ header: number; end: number }> = [];
   const measure = Math.min(total, MEASURE);
   const { lettered, byExcerpt } = letterStopNotes(stop);
+  const others = otherFiles(stop);
+  const gutter = Math.max(
+    2,
+    ...[...stop.excerpts, ...(showFileDiffs ? others : [])]
+      .flatMap(({ path }) => files.get(path)?.hunks.flatMap((hunk) => hunk.rows) ?? [])
+      .map((row) => String(row.newLine ?? row.oldLine ?? "").length),
+  );
   const out: Array<Line> = [...prose(stop.title, measure, { color: THEME.strong, bold: true })];
   if (stop.summary.trim() !== "") out.push(BLANK, ...prose(stop.summary, measure));
 
@@ -274,7 +321,7 @@ export function stopLines({ stop, isLast, nextTitle, files, showFileDiffs }: Sto
   stop.excerpts.forEach((excerpt, excerptIndex) => {
     const file = files.get(excerpt.path);
     out.push(BLANK);
-    if (excerpt.caption.trim()) out.push(...prose(excerpt.caption, measure, { color: THEME.muted }));
+    if (excerpt.caption.trim()) out.push(...prose(excerpt.caption, measure));
     const segments = file ? excerptRows(file, excerpt) : [];
     const header = out.length;
     out.push(blockHeader(excerpt.path, `L${excerpt.start}–${excerpt.end}${excerpt.side === "old" ? " · removed" : ""}`, file ? countRows(segments.flat()) : null, total));
@@ -289,7 +336,7 @@ export function stopLines({ stop, isLast, nextTitle, files, showFileDiffs }: Sto
         return [line, lettered.filter(({ marker }) => letters.includes(marker))] as const;
       }),
     );
-    out.push(...codeLines({ path: excerpt.path, segments, side: excerpt.side, notesAt }, total, measure));
+    out.push(...codeLines({ path: excerpt.path, segments, side: excerpt.side, gutter, notesAt }, total, measure));
     blocks.push({ header, end: out.length });
   });
 
@@ -298,27 +345,22 @@ export function stopLines({ stop, isLast, nextTitle, files, showFileDiffs }: Sto
   if (loose.length > 0) {
     out.push(BLANK, heading("Notes"));
     for (const { marker, note } of loose) {
-      out.push(BLANK, [
-        { text: ` ${marker} `, color: "#1d1f21", bg: THEME.attention, bold: true },
-        { text: ` ${note.title}`, color: THEME.strong, bold: true },
-        { text: `  ${note.path.split("/").at(-1)}:${note.line}`, color: THEME.muted },
-      ]);
+      out.push(BLANK, ...markedTitle(marker, note.title, measure), [{ text: `    ${note.path.split("/").at(-1)}:${note.line}`, color: THEME.muted }]);
       if (note.body.trim() !== "") out.push(...prose(note.body, measure, undefined, "    "));
     }
   }
 
   let filesAt: number | null = null;
-  const others = otherFiles(stop);
   if (others.length > 0) {
     out.push(BLANK);
     filesAt = out.length;
-    out.push([...heading(stop.excerpts.length > 0 ? "Also in this stop" : "Files in this stop"), { text: "  " }, chip("f")]);
+    out.push([...heading(stop.excerpts.length > 0 ? "Also in this stop" : "Files in this stop"), { text: "  " }, chip(`f ${showFileDiffs ? "▾" : "▸"}`)]);
     for (const other of others) {
       const file = files.get(other.path);
       const header = out.length;
       out.push(
         showFileDiffs
-          ? blockHeader(other.path, "", file ?? null, total)
+          ? blockHeader(other.path, "", file ?? null, total, "▾ ")
           : [{ text: "▸ ", color: THEME.muted }, ...pathSpans(other.path), ...(file ? [{ text: "  " }, ...stats(file)] : [])],
       );
       if (other.note.trim() !== "") out.push(...prose(other.note, measure, { color: THEME.muted }, "  "));
@@ -328,7 +370,7 @@ export function stopLines({ stop, isLast, nextTitle, files, showFileDiffs }: Sto
             ? [[{ text: "  This file is not in the diff.", color: THEME.muted }]]
             : file.hunks.length === 0
               ? [[{ text: "  No text changes (binary, rename or mode change).", color: THEME.muted }]]
-              : codeLines({ path: file.path, segments: file.hunks.map((hunk) => hunk.rows), side: "new" }, total, measure)),
+              : fileCode(file, gutter, total, measure)),
         );
         blocks.push({ header, end: out.length });
         out.push(BLANK);
@@ -345,11 +387,13 @@ export function stopLines({ stop, isLast, nextTitle, files, showFileDiffs }: Sto
 
   out.push(BLANK, [{ text: "─".repeat(total), color: THEME.border }]);
   out.push(
-    nextTitle !== null
-      ? [chip("→"), { text: "  Next  ", color: THEME.muted }, { text: nextTitle, color: THEME.strong, bold: true }]
+    ...(nextTitle !== null
+      ? prose(nextTitle, Math.min(total, MEASURE + 9), { color: THEME.strong, bold: true }, " ".repeat(9)).map((line, i) =>
+          i === 0 ? [chip("→"), { text: "  Next  ", color: THEME.muted }, ...line.slice(1)] : line,
+        )
       : isLast
-        ? [{ text: "That's the tour.  ", color: THEME.strong, bold: true }, chip("o"), { text: "  Open the PR", color: THEME.text }]
-        : [],
+        ? [[{ text: "That's the tour.  ", color: THEME.strong, bold: true }, chip("o"), { text: "  Open the PR", color: THEME.text }]]
+        : []),
   );
   return { lines: out, filesAt, blocks };
 }
@@ -381,7 +425,7 @@ export function railLines({ stops, position, seen }: RailView, railWidth: number
     const bullet: Span = read
       ? { text: " ✔ ", color: THEME.success }
       : { text: `${String(index + 1).padStart(2)} `, color: active ? THEME.strong : THEME.muted };
-    const titleStyle: Style = { color: active ? THEME.strong : read ? THEME.muted : THEME.text, bold: active };
+    const titleStyle: Style = { color: active ? THEME.strong : THEME.text, bold: active };
     const wrapped = prose(stop.title, railWidth - 5, titleStyle);
     const title = wrapped.length > 3 && !active ? [...wrapped.slice(0, 2), [...(wrapped[2] ?? []), { ...titleStyle, text: "…" }]] : wrapped;
     if (active) activeStart = out.length;

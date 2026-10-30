@@ -91,7 +91,8 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
       }
       if (helpOpen) return setHelpOpen(false);
       if (input === "?") return setHelpOpen(true);
-      if (input === "q" || (key.escape && screen.kind !== "writing")) return exit();
+      // Esc only ever closes things; quitting takes q.
+      if (input === "q") return exit();
       if (input === "s" && screen.kind !== "writing") return setSettingsOpen(true);
       if (input === "o" && pr) return openUrl(pr.url);
       if (screen.kind === "intro" && key.return) return write(screen.pr, null);

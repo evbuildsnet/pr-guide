@@ -3,7 +3,7 @@ import { useState } from "react";
 
 import { describeChoice, EFFORTS, EFFORT_LABELS, PROVIDERS, PROVIDER_IDS, TIER_LABELS, tiersFor, type ModelChoice } from "../catalog.ts";
 import { activeChoice, sanitizeChoice, saveSettings, type Settings as SettingsData } from "../settings.ts";
-import { THEME, type Line } from "./lines.ts";
+import { chip, THEME, type Line } from "./lines.ts";
 import { Lines } from "./Tour.tsx";
 
 interface Row {
@@ -81,9 +81,7 @@ export function Settings({
 
   return (
     <Box flexDirection="column" paddingX={2} paddingY={1} gap={1}>
-      <Text color={THEME.strong} bold>
-        Settings
-      </Text>
+      <Lines lines={[[{ text: "Settings", color: THEME.strong, bold: true }, { text: " ".repeat(ROW_WIDTH - 8 - 5) }, chip("esc")]]} />
       <Lines
         lines={rows.map((row, index) => {
           const active = index === selected;

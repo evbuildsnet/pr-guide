@@ -5,15 +5,15 @@ import type { Guide } from "../model.ts";
 import { stopSubline } from "../tour.ts";
 import { chip, MEASURE, railLines, stopLines, THEME, type Line, type Span } from "./lines.ts";
 
-/** Below this the rail hides, as t3code drops it on narrow panes, so the reading pane keeps ~90 columns. */
-const RAIL_MIN_COLUMNS = 120;
+/** The rail hides, as t3code drops it on narrow panes, when keeping it would leave code less than this. */
+const CODE_MIN_COLUMNS = 96;
 /** Code fills the content column up to this width; wider terminals keep the column composed. */
 const CONTENT_MAX = 120;
-const railWidth = (columns: number) => (columns >= 150 ? 34 : 28);
+const railWidth = (columns: number) => (columns >= 180 ? 40 : columns >= 150 ? 34 : 28);
 
 export function Lines({ lines }: { lines: ReadonlyArray<Line> }) {
   return (
-    <>
+    <Box flexDirection="column">
       {lines.map((line, index) => (
         <Text key={index} wrap="truncate-end">
           {line.length === 0
@@ -25,16 +25,22 @@ export function Lines({ lines }: { lines: ReadonlyArray<Line> }) {
               ))}
         </Text>
       ))}
-    </>
+    </Box>
   );
 }
 
-/** A one-column scrollbar: a thumb sized to the visible share of the stop. */
-function scrollbar(rows: number, total: number, top: number): string {
-  if (total <= rows) return "";
-  const size = Math.max(Math.round((rows / total) * rows), 1);
-  const start = Math.round((top / (total - rows)) * (rows - size));
-  return Array.from({ length: rows }, (_, i) => (i >= start && i < start + size ? "┃" : " ")).join("\n");
+/** A one-column scrollbar: arrows at the ends while there is more that way, a thumb sized to the visible share. */
+function scrollbar(rows: number, total: number, top: number): ReadonlyArray<Line> {
+  if (total <= rows || rows < 3) return [];
+  const track = rows - 2;
+  const size = Math.max(Math.round((rows / total) * track), 1);
+  const start = Math.round((top / (total - rows)) * (track - size));
+  const end = (more: boolean, glyph: string): Line => [{ text: more ? glyph : " ", color: THEME.muted }];
+  return [
+    end(top > 0, "↑"),
+    ...Array.from({ length: track }, (_, i): Line => [{ text: i >= start && i < start + size ? "┃" : " ", color: THEME.faint }]),
+    end(top < total - rows, "↓"),
+  ];
 }
 
 export function Tour({
@@ -56,7 +62,7 @@ export function Tour({
   const files = useMemo(() => new Map(guide.files.map((file) => [file.path, file])), [guide]);
   const stopCount = guide.stops.length;
   const stop = guide.stops[position];
-  const showRail = columns >= RAIL_MIN_COLUMNS;
+  const showRail = columns - railWidth(columns) - 5 >= CODE_MIN_COLUMNS;
   const rail = showRail ? railWidth(columns) : 0;
   // The stop counter stays pinned above the scrolling pane.
   const paneRows = Math.max(rows - 2, 1);
@@ -100,8 +106,8 @@ export function Tour({
       else if (input === "g" || key.home) setScroll(0);
       else if (input === "G" || key.end) setScroll(maxScroll);
       else if (input === "f" && filesAt !== null) {
-        // Expanding brings the file list into view so the toggle visibly does something.
-        if (!showFileDiffs) setScroll(filesAt);
+        // Either way the file list comes into view, so the toggle visibly does something.
+        setScroll(filesAt);
         setShowFileDiffs(!showFileDiffs);
       } else if (/^[1-9]$/.test(input)) goTo(Number(input) - 1);
     },
@@ -114,9 +120,9 @@ export function Tour({
 
   const first = position === 0;
   const last = position === stopCount - 1;
-  const key = (glyph: string, enabled: boolean): Span => (enabled ? chip(glyph) : { ...chip(glyph), color: THEME.faint, bg: THEME.headerBg, bold: false });
+  const key = (glyph: string, enabled: boolean): Span => (enabled ? chip(glyph) : { ...chip(glyph), color: THEME.disabled, bg: THEME.headerBg, bold: false });
   const keys: Line = [key("←", !first), { text: " " }, key("→", !last), { text: "  " }, chip("?")];
-  // Keys line up with the prose's right edge; without the rail, the stop title fills the gap.
+  // Keys line up with the prose's right edge. Without the rail, the stop title fills the gap once it scrolls away.
   const keysAt = Math.min(MEASURE, paneWidth);
   const counter: Line =
     stop === undefined
@@ -125,7 +131,7 @@ export function Tour({
           { text: "Stop ", color: THEME.muted },
           { text: String(position + 1), color: THEME.strong, bold: true },
           { text: ` of ${stopCount}  ·  ${stopSubline(stop)}`, color: THEME.muted },
-          ...(showRail ? [] : [{ text: `  ·  ${stop.title}`, color: THEME.text }]),
+          ...(showRail || top === 0 ? [] : [{ text: `  ·  ${stop.title}`, color: THEME.text }]),
         ];
   const counterRoom = keysAt - 13 - 2;
   const fitted = counter.reduce<{ spans: Array<Span>; used: number }>(
@@ -140,7 +146,8 @@ export function Tour({
   const pinned: Line = [...fitted.spans, { text: " ".repeat(Math.max(keysAt - 13 - fitted.used, 2)) }, ...keys];
 
   // A code block scrolled partly out of view keeps its file header on the first row.
-  const block = blocks.find(({ header, end }) => header < top && top < end);
+  // It needs at least one of the block's rows still under it, or it would label nothing.
+  const block = blocks.find(({ header, end }) => header < top && top + 1 < end);
   const visible = block ? [lines[block.header] ?? [], ...lines.slice(top + 1, top + paneRows)] : lines.slice(top, top + paneRows);
 
   return (
@@ -165,7 +172,7 @@ export function Tour({
             <Lines lines={visible} />
           </Box>
           <Box width={1} flexDirection="column" overflow="hidden">
-            <Text color={THEME.faint}>{scrollbar(paneRows, lines.length, top)}</Text>
+            <Lines lines={scrollbar(paneRows, lines.length, top)} />
           </Box>
         </Box>
       </Box>
