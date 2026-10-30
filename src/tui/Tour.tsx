@@ -1,29 +1,47 @@
 import { Box, Text, useInput } from "ink";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import type { Guide } from "../model.ts";
-import { railLines, stopLines, type Line } from "./lines.ts";
+import { stopSubline } from "../tour.ts";
+import { chip, railLines, stopLines, THEME, type Line, type Onward, type Span } from "./lines.ts";
+import { layout, pageDown, settle } from "./viewport.ts";
 
-const RAIL_WIDTH = 34;
-/** Below this the rail hides, as t3code drops it on narrow panes. */
-const RAIL_MIN_COLUMNS = 100;
+/** The rail hides, as t3code drops it on narrow panes, when keeping it would leave code less than this. */
+const CODE_MIN_COLUMNS = 100;
+/** Code fills the content column up to this width; prose keeps its own 80-column measure inside it. */
+const CONTENT_MAX = 160;
+const railWidth = (columns: number) => (columns >= 180 ? 40 : columns >= 150 ? 34 : 28);
 
 export function Lines({ lines }: { lines: ReadonlyArray<Line> }) {
   return (
-    <>
+    <Box flexDirection="column">
       {lines.map((line, index) => (
         <Text key={index} wrap="truncate-end">
           {line.length === 0
             ? " "
             : line.map((span, spanIndex) => (
-                <Text key={spanIndex} color={span.color} backgroundColor={span.bg} bold={span.bold} dimColor={span.dim}>
+                <Text key={spanIndex} color={span.color} backgroundColor={span.bg} bold={span.bold} italic={span.italic}>
                   {span.text}
                 </Text>
               ))}
         </Text>
       ))}
-    </>
+    </Box>
   );
+}
+
+/** A one-column scrollbar: arrows at the ends while there is more that way, a thumb sized to the visible share. */
+function scrollbar(rows: number, total: number, top: number): ReadonlyArray<Line> {
+  if (total <= rows || rows < 3) return [];
+  const track = rows - 2;
+  const size = Math.max(Math.round((rows / total) * track), 1);
+  const start = Math.round((top / (total - rows)) * (track - size));
+  const end = (more: boolean, glyph: string): Line => [{ text: more ? glyph : " ", color: THEME.faint }];
+  return [
+    end(top > 0, "↑"),
+    ...Array.from({ length: track }, (_, i): Line => [{ text: i >= start && i < start + size ? "┃" : " ", color: THEME.thumb }]),
+    end(top < total - rows, "↓"),
+  ];
 }
 
 export function Tour({
@@ -31,91 +49,179 @@ export function Tour({
   columns,
   rows,
   active,
+  cover,
 }: {
   guide: Guide;
   columns: number;
   rows: number;
   active: boolean;
+  /** Shown in place of the stop, keeping the rail, e.g. the key list. Told what → does here. */
+  cover?: (context: { onward: string; stops: number }) => ReactNode;
 }) {
   const [position, setPosition] = useState(0);
   const [seen, setSeen] = useState<ReadonlySet<number>>(new Set());
   const [scroll, setScroll] = useState(0);
   const [showFileDiffs, setShowFileDiffs] = useState(false);
+  // Blank rows past the end, so a jump can put its target on the top row of a short stop. Scrolling up drops them.
+  const [reach, setReach] = useState(0);
 
   const files = useMemo(() => new Map(guide.files.map((file) => [file.path, file])), [guide]);
   const stopCount = guide.stops.length;
   const stop = guide.stops[position];
-  const showRail = columns >= RAIL_MIN_COLUMNS;
-  const paneRows = Math.max(rows - 1, 1);
-  const paneWidth = Math.max(columns - (showRail ? RAIL_WIDTH + 2 : 0) - 3, 20);
+  const showRail = columns - railWidth(columns) - 5 >= CODE_MIN_COLUMNS;
+  const rail = showRail ? railWidth(columns) : 0;
+  // The stop counter stays pinned above the scrolling pane.
+  const paneRows = Math.max(rows - 2, 1);
+  // Rail, divider and its margin, pane padding, scrollbar.
+  const paneWidth = Math.min(Math.max(columns - (showRail ? rail + 2 : 0) - 3, 20), CONTENT_MAX);
 
-  const lines = useMemo(
+  const last = position === stopCount - 1;
+  // From the last stop, → goes to the first stop still unread, then finishes the tour.
+  const firstUnread = guide.stops.findIndex((_, index) => index !== position && !seen.has(index));
+  const onward: Onward = !last
+    ? { kind: "next", title: guide.stops[position + 1]?.title ?? "", label: "Next" }
+    : firstUnread !== -1
+      ? { kind: "next", title: guide.stops[firstUnread]?.title ?? "", label: "Next unread" }
+      : seen.has(position)
+        ? { kind: "done" }
+        : { kind: "finish" };
+
+  const { lines: content, filesAt, blocks, ruleAt } = useMemo(
     () =>
       stop === undefined
-        ? [[{ text: "This change has no files to tour.", dim: true }]]
+        ? { lines: [[{ text: "This change has no files to tour.", color: THEME.muted }]], filesAt: null, blocks: [], ruleAt: -1, wide: false }
         : stopLines(
-            { stop, index: position, count: stopCount, nextTitle: guide.stops[position + 1]?.title ?? null, files, showFileDiffs },
-            paneWidth,
+            { stop, onward, files, showFileDiffs },
+            // A column of air before the scrollbar.
+            paneWidth - 1,
           ),
-    [stop, position, stopCount, guide, files, showFileDiffs, paneWidth],
+    [stop, JSON.stringify(onward), files, showFileDiffs, paneWidth],
   );
+  const lines = reach > content.length ? [...content, ...Array.from({ length: reach - content.length }, (): Line => [])] : content;
   const maxScroll = Math.max(lines.length - paneRows, 0);
   const top = Math.min(scroll, maxScroll);
 
-  const goTo = (next: number) => {
+  const goTo = (next: number, markRead = next > position) => {
     const clamped = Math.max(Math.min(next, stopCount - 1), 0);
     if (clamped === position) return;
-    if (clamped > position) setSeen((current) => new Set(current).add(position));
+    if (markRead) setSeen((current) => new Set(current).add(position));
     setPosition(clamped);
     setScroll(0);
+    setReach(0);
+    setShowFileDiffs(false);
   };
-  const scrollBy = (delta: number) => setScroll(Math.max(Math.min(top + delta, maxScroll), 0));
-
+  const pane = { lines, blocks, rows: paneRows };
+  const scrollBy = (delta: number) => {
+    if (delta < 0) setReach(0);
+    setScroll(settle(pane, top, top + delta));
+  };
   useInput(
     (input, key) => {
       if (input === "j" || input === "n" || key.rightArrow || key.return) {
-        // On the last stop, moving on finishes the tour.
-        if (position === stopCount - 1) setSeen((current) => new Set(current).add(position));
-        else goTo(position + 1);
+        if (!last) goTo(position + 1);
+        else if (firstUnread !== -1) goTo(firstUnread, true);
+        else setSeen((current) => new Set(current).add(position));
       } else if (input === "k" || input === "p" || key.leftArrow) goTo(position - 1);
       else if (key.downArrow) scrollBy(1);
       else if (key.upArrow) scrollBy(-1);
-      else if (input === " " || key.pageDown) scrollBy(paneRows - 2);
+      else if (input === " " || key.pageDown) setScroll(pageDown(pane, top));
       else if (input === "b" || key.pageUp) scrollBy(-(paneRows - 2));
-      else if (input === "g" || key.home) setScroll(0);
+      else if (input === "g" || key.home) scrollBy(-top);
       else if (input === "G" || key.end) setScroll(maxScroll);
-      else if (input === "f") setShowFileDiffs((current) => !current);
-      else if (/^[1-9]$/.test(input)) goTo(Number(input) - 1);
+      else if (input === "f" && filesAt !== null) {
+        // Either way the file list comes to the top row, so the toggle visibly does something.
+        setReach(filesAt + paneRows);
+        setScroll(filesAt);
+        setShowFileDiffs(!showFileDiffs);
+        // Jumping is looking around, not reading: only → marks a stop read.
+      } else if (/^[1-9]$/.test(input)) goTo(Number(input) - 1, false);
     },
     { isActive: active },
   );
 
-  const progress = maxScroll === 0 ? "" : top === 0 ? "top" : top >= maxScroll ? "end" : `${Math.round((top / maxScroll) * 100)}%`;
-  const hints = "j/k stops · ↑↓ space scroll · 1-9 jump · f files · o open PR · r rewrite · s settings · q quit";
+  const railView = useMemo(() => railLines({ stops: guide.stops, position, seen }, rail - 1, rows), [guide, position, seen, rail, rows]);
+  // Keeps the active stop in view on short terminals.
+  const railTop = Math.max(Math.min(railView.activeStart, railView.activeEnd + 2 - (rows - 1)), 0);
+
+  const first = position === 0;
+  // A key that does nothing here drops its cap and dims, so it reads as resting, not broken.
+  const key = (glyph: string, enabled: boolean): Span => (enabled ? chip(glyph) : { text: ` ${glyph} `, color: THEME.disabled });
+  // While the key list covers the stop, ? shows it's open; the arrows still work, so they stay as they are.
+  const covered = cover !== undefined;
+  const keys: Line = [
+    key("←", !first),
+    { text: " " },
+    key("→", onward.kind !== "done"),
+    { text: "  " },
+    covered ? { ...chip("?"), color: THEME.background, bg: THEME.accent } : chip("?"),
+  ];
+  // Keys keep one place for the whole tour: the content's right edge.
+  const keysAt = paneWidth - 1;
+  const readCount = seen.size > 0 ? `  ·  ${seen.size} read` : "";
+  const counter: Line =
+    stop === undefined
+      ? []
+      : [
+          { text: "Stop ", color: THEME.muted },
+          { text: String(position + 1), color: THEME.strong, bold: true },
+          // Once the heading scrolls away without a rail, the title says more than the file count.
+          // With the rail, the file count is already under the active stop.
+          // Without the rail, the read count rides along too, once there is one.
+          ...(showRail
+            ? [{ text: ` of ${stopCount}`, color: THEME.muted }]
+            : top === 0
+              ? [{ text: ` of ${stopCount}${readCount}  ·  ${stopSubline(stop)}`, color: THEME.muted }]
+              : [{ text: ` of ${stopCount}${readCount}  ·  `, color: THEME.muted }, { text: stop.title, color: THEME.text }]),
+        ];
+  // Two columns of air before the keys, however long the title.
+  const counterRoom = keysAt - 13 - 3;
+  const fitted = counter.reduce<{ spans: Array<Span>; used: number }>(
+    ({ spans, used }, span) => {
+      const room = counterRoom - used;
+      if (room <= 0) return { spans, used };
+      const text = span.text.length > room ? `${span.text.slice(0, room - 1)}…` : span.text;
+      return { spans: [...spans, { ...span, text }], used: used + text.length };
+    },
+    { spans: [], used: 0 },
+  );
+  const pinned: Line = [...fitted.spans, { text: " ".repeat(Math.max(keysAt - 13 - fitted.used, 2)) }, ...keys];
+
+  const { pins, from, shown } = layout(pane, top);
+  // The rule above Next never ends the view on its own.
+  const ruleLast = from + shown.length - 1 === ruleAt;
+  const visible = [...pins, ...(ruleLast ? [...shown.slice(0, -1), []] : shown)];
 
   return (
-    <Box flexDirection="column">
-      <Box flexDirection="row" height={paneRows}>
-        {showRail ? (
-          <>
-            <Box flexDirection="column" width={RAIL_WIDTH} paddingLeft={1} overflow="hidden">
-              <Lines lines={railLines({ stops: guide.stops, position, seen }, RAIL_WIDTH - 1).slice(0, paneRows)} />
-            </Box>
-            <Box width={1} marginRight={1} flexDirection="column" overflow="hidden">
-              <Text dimColor>{"│\n".repeat(paneRows).trimEnd()}</Text>
-            </Box>
-          </>
-        ) : null}
-        <Box flexDirection="column" width={paneWidth + 1} paddingLeft={1} overflow="hidden">
-          <Lines lines={lines.slice(top, top + paneRows)} />
+    <Box flexDirection="row" height={rows}>
+      {showRail ? (
+        <>
+          <Box flexDirection="column" width={rail} paddingLeft={1} overflow="hidden">
+            <Lines lines={railView.lines.slice(railTop, railTop + rows)} />
+          </Box>
+          <Box width={1} marginRight={1} flexDirection="column" overflow="hidden">
+            <Text color={THEME.border}>{"│\n".repeat(rows).trimEnd()}</Text>
+          </Box>
+        </>
+      ) : null}
+      <Box flexDirection="column" paddingLeft={1}>
+        <Box width={paneWidth + 1} overflow="hidden">
+          <Lines lines={[pinned]} />
         </Box>
-      </Box>
-      <Box paddingX={1}>
-        <Box flexGrow={1} flexShrink={1}>
-          <Text dimColor wrap="truncate-end">{hints}</Text>
-        </Box>
-        <Box flexShrink={0} marginLeft={2}>
-          <Text dimColor>{progress}</Text>
+        <Box height={1} />
+        <Box flexDirection="row" height={paneRows}>
+          <Box flexDirection="column" width={paneWidth} overflow="hidden">
+            {cover ? (
+              cover({
+                onward: onward.kind === "next" ? (onward.label === "Next" ? "Next stop" : "Next unread stop") : onward.kind === "finish" ? "Finish the tour" : "Nothing next: the tour is done",
+                stops: stopCount,
+              })
+            ) : (
+              <Lines lines={visible} />
+            )}
+          </Box>
+          <Box width={1} flexDirection="column" overflow="hidden">
+            <Lines lines={covered ? [] : scrollbar(paneRows, lines.length, top)} />
+          </Box>
         </Box>
       </Box>
     </Box>

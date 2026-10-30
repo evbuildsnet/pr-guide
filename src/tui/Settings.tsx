@@ -1,9 +1,10 @@
 import { Box, Text, useInput } from "ink";
 import { useState } from "react";
 
-import { EFFORTS, EFFORT_LABELS, PROVIDERS, PROVIDER_IDS, TIER_LABELS, tiersFor } from "../catalog.ts";
-import { activeChoice, sanitizeChoice, saveSettings, settingsPath, type Settings as SettingsData } from "../settings.ts";
-import { THEME } from "./lines.ts";
+import { describeChoice, EFFORTS, EFFORT_LABELS, PROVIDERS, PROVIDER_IDS, TIER_LABELS, tiersFor, type ModelChoice } from "../catalog.ts";
+import { activeChoice, sanitizeChoice, saveSettings, type Settings as SettingsData } from "../settings.ts";
+import { chip, prose, THEME, type Line } from "./lines.ts";
+import { Lines } from "./Tour.tsx";
 
 interface Row {
   readonly label: string;
@@ -12,18 +13,26 @@ interface Row {
   readonly apply: (id: string) => SettingsData;
 }
 
+/** Rows, the title's esc and the description share one edge. */
+const ROW_WIDTH = 72;
+
 const cycle = <T,>(items: ReadonlyArray<T>, current: T, delta: number): T =>
   items[(items.indexOf(current) + delta + items.length) % items.length] ?? current;
 
 /** Provider, model, reasoning and speed, as in t3code's model picker. Saved on every change. */
 export function Settings({
   settings,
+  written,
   onChange,
   onClose,
+  onQuit,
 }: {
   settings: SettingsData;
+  /** The model the open guide was written with, if any. */
+  written: ModelChoice | null;
   onChange: (settings: SettingsData) => void;
   onClose: () => void;
+  onQuit: () => void;
 }) {
   const [selected, setSelected] = useState(0);
   const choice = activeChoice(settings);
@@ -61,7 +70,8 @@ export function Settings({
   ];
 
   useInput((input, key) => {
-    if (key.escape || key.return || input === "s" || input === "q") return onClose();
+    if (input === "q") return onQuit();
+    if (key.escape || key.return || input === "s") return onClose();
     if (key.upArrow || input === "k") setSelected((current) => (current + rows.length - 1) % rows.length);
     if (key.downArrow || input === "j") setSelected((current) => (current + 1) % rows.length);
     const delta = key.leftArrow || input === "h" ? -1 : key.rightArrow || input === "l" || input === " " ? 1 : 0;
@@ -75,36 +85,28 @@ export function Settings({
 
   return (
     <Box flexDirection="column" paddingX={2} paddingY={1} gap={1}>
-      <Text bold>Settings</Text>
-      <Box flexDirection="column">
-        {rows.map((row, index) => {
+      <Lines lines={[[{ text: "Settings", color: THEME.strong, bold: true }, { text: " ".repeat(ROW_WIDTH - 8 - 5) }, chip("esc")]]} />
+      <Lines
+        lines={rows.map((row, index) => {
           const active = index === selected;
           const label = row.options.find((option) => option.id === row.current)?.label ?? row.current;
-          return (
-            <Box key={row.label}>
-              <Text color={active ? THEME.accent : undefined}>{active ? "› " : "  "}</Text>
-              <Box width={12}>
-                <Text dimColor={!active}>{row.label}</Text>
-              </Box>
-              {row.options.length < 2 ? (
-                <Text dimColor>
-                  {label}  only option for this model
-                </Text>
-              ) : (
-                <Text bold={active}>
-                  <Text dimColor>‹ </Text>
-                  {label}
-                  <Text dimColor> ›</Text>
-                </Text>
-              )}
-            </Box>
-          );
+          const fixed = row.options.length < 2;
+          // Every changeable value shows its arrows; the selected row lights them.
+          const arrow = fixed ? THEME.background : active ? THEME.accent : THEME.thumb;
+          const line: Line = [
+            { text: active ? "▌" : " ", color: THEME.accent },
+            { text: ` ${row.label.padEnd(12)}`, color: active ? THEME.strong : THEME.faint, bold: active },
+            { text: fixed ? "  " : "‹ ", color: arrow },
+            { text: label, color: fixed ? THEME.muted : active ? THEME.bright : THEME.soft, bold: active },
+            { text: fixed ? "" : " ›", color: arrow },
+          ];
+          const width = line.reduce((sum, span) => sum + span.text.length, 0);
+          const padded: Line = [...line, { text: " ".repeat(Math.max(ROW_WIDTH - width, 0)) }];
+          return active ? padded.map((span) => ({ ...span, bg: THEME.selection })) : padded;
         })}
-      </Box>
-      <Text dimColor>
-        Runs your installed `{provider}` CLI with its own login. Saved to {settingsPath}
-      </Text>
-      <Text dimColor>↑↓ choose · ←→ change · enter done</Text>
+      />
+      <Lines lines={prose(`Uses your ${provider} CLI and its login. Changes save automatically and apply to the next guide.`, 72, { color: THEME.muted })} />
+      {written ? <Lines lines={prose(`This guide was written with ${describeChoice(written)}.`, ROW_WIDTH, { color: THEME.muted })} /> : null}
     </Box>
   );
 }
