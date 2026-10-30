@@ -84,7 +84,11 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
   useInput(
     (input, key) => {
       const pr = screen.kind === "loading" ? null : screen.pr;
-      if (helpOpen) return input === "q" ? exit() : setHelpOpen(false);
+      if (helpOpen) {
+        // Keys the list advertises work from it; anything else just closes it.
+        setHelpOpen(false);
+        if (!"qsor".includes(input) || input === "") return;
+      }
       if (screen.kind === "writing" && key.escape) {
         abort.current?.abort();
         setScreen(screen.previous ? { kind: "tour", pr: screen.pr, guide: screen.previous } : { kind: "intro", pr: screen.pr });
@@ -116,7 +120,7 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
         {pr ? (
           <>
             <Text color={THEME.faint}>{`${pr.repo} #${pr.number}  `}</Text>
-            <Text color={THEME.caption}>{pr.title}</Text>
+            <Text color={THEME.title}>{pr.title}</Text>
           </>
         ) : (
           <Text color={THEME.muted}>pr-guide</Text>

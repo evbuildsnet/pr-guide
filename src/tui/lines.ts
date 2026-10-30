@@ -10,7 +10,6 @@ export interface Span {
   readonly bg?: string;
   readonly bold?: boolean;
   readonly italic?: boolean;
-  readonly underline?: boolean;
   /** Marks a row that continues the one above it, so scrolling never opens a view on it. */
   readonly cont?: boolean;
 }
@@ -29,10 +28,18 @@ export const THEME = {
   faint: "#8b93a1",
   disabled: "#5c6370",
   accent: "#61afef",
+  /** Selected things that needn't be bold: the active rail title, the chosen setting. */
+  bright: "#e6e8ec",
   /** Rail titles that aren't selected: quieter than body text so the rail doesn't compete with it. */
   soft: "#abb2bf",
-  /** Captions and the PR title: a step under body text, a step over secondary. */
-  caption: "#c8ccd4",
+  /** An excerpt's caption: the sentence that says why the code matters. */
+  caption: "#e6e8ec",
+  /** The PR title in the header: a step under body text. */
+  title: "#c8ccd4",
+  /** Rows pinned over a scrolled code block. */
+  pinnedBg: "#343a46",
+  /** Read stops in the rail recede, so what's left stands out. */
+  read: "#8b93a1",
   thumb: "#737d8c",
   code: "#e6e8ec",
   codeChip: "#3e4451",
@@ -480,7 +487,7 @@ export function stopLines({ stop, onward, files, showFileDiffs }: StopView, tota
   if (onward.kind === "next") {
     const lead = `  ${onward.label}  `;
     out.push(
-      ...prose(onward.title, Math.min(total, MEASURE + 3 + lead.length), { color: THEME.text, bold: true }, " ".repeat(3 + lead.length)).map((line, i) =>
+      ...prose(onward.title, Math.min(total, MEASURE + 3 + lead.length), { color: THEME.text }, " ".repeat(3 + lead.length)).map((line, i) =>
         i === 0 ? [chip("→"), { text: lead, color: THEME.muted }, ...line.slice(1)] : line,
       ),
     );
@@ -526,7 +533,8 @@ function railRows({ stops, position, seen }: RailView, railWidth: number, maxLin
       { text: read ? "✔" : " ", color: THEME.success },
       { text: `${String(index + 1).padStart(2)} `, color: active ? THEME.strong : THEME.muted },
     ];
-    const titleStyle: Style = { color: active ? THEME.strong : THEME.soft, bold: active };
+    // Selection already marks the active stop, so its title needn't shout.
+    const titleStyle: Style = { color: active ? THEME.bright : read ? THEME.read : THEME.soft };
     const wrapped = prose(stop.title, railWidth - 7, titleStyle);
     const title =
       wrapped.length > maxLines && !active

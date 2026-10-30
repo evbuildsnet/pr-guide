@@ -1,4 +1,4 @@
-import { isContinuation, type Block, type Line } from "./lines.ts";
+import { isContinuation, THEME, type Block, type Line } from "./lines.ts";
 
 /** A stop's rows and the code blocks among them, seen through a pane this many rows tall. */
 export interface Pane {
@@ -20,9 +20,9 @@ export function layout(pane: Pane, top: number) {
   const rowsOf = (block: Block) => [...(block.caption !== null ? [block.caption] : []), block.header];
   const block = blocks.find((candidate) => (candidate.caption ?? candidate.header) < top && top + rowsOf(candidate).length < candidate.end);
   const pinned = block ? rowsOf(block) : [];
-  // Pinned, the path row is underlined: the edge says rows sit under it.
+  // Pinned rows sit on a raised tint, the usual cue for a sticky header.
   const pins = pinned.map((index) =>
-    index === block?.header ? (block.pinned ?? lines[index] ?? []).map((span) => ({ ...span, underline: true })) : (lines[index] ?? []),
+    (index === block?.header ? (block.pinned ?? lines[index] ?? []) : (lines[index] ?? [])).map((span) => ({ ...span, bg: THEME.pinnedBg })),
   );
   let from = top + pins.length;
   if (top < maxScroll(pane)) while (from > 0 && isContinuation(lines[from] ?? [])) from--;

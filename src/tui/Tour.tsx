@@ -20,7 +20,7 @@ export function Lines({ lines }: { lines: ReadonlyArray<Line> }) {
           {line.length === 0
             ? " "
             : line.map((span, spanIndex) => (
-                <Text key={spanIndex} color={span.color} backgroundColor={span.bg} bold={span.bold} italic={span.italic} underline={span.underline}>
+                <Text key={spanIndex} color={span.color} backgroundColor={span.bg} bold={span.bold} italic={span.italic}>
                   {span.text}
                 </Text>
               ))}
@@ -62,6 +62,8 @@ export function Tour({
   const [seen, setSeen] = useState<ReadonlySet<number>>(new Set());
   const [scroll, setScroll] = useState(0);
   const [showFileDiffs, setShowFileDiffs] = useState(false);
+  // Blank rows past the end, so a jump can put its target on the top row of a short stop. Scrolling up drops them.
+  const [reach, setReach] = useState(0);
 
   const files = useMemo(() => new Map(guide.files.map((file) => [file.path, file])), [guide]);
   const stopCount = guide.stops.length;
@@ -84,7 +86,7 @@ export function Tour({
         ? { kind: "done" }
         : { kind: "finish" };
 
-  const { lines, filesAt, blocks, ruleAt } = useMemo(
+  const { lines: content, filesAt, blocks, ruleAt } = useMemo(
     () =>
       stop === undefined
         ? { lines: [[{ text: "This change has no files to tour.", color: THEME.muted }]], filesAt: null, blocks: [], ruleAt: -1, wide: false }
@@ -95,6 +97,7 @@ export function Tour({
           ),
     [stop, JSON.stringify(onward), files, showFileDiffs, paneWidth],
   );
+  const lines = reach > content.length ? [...content, ...Array.from({ length: reach - content.length }, (): Line => [])] : content;
   const maxScroll = Math.max(lines.length - paneRows, 0);
   const top = Math.min(scroll, maxScroll);
 
@@ -104,10 +107,14 @@ export function Tour({
     if (markRead) setSeen((current) => new Set(current).add(position));
     setPosition(clamped);
     setScroll(0);
+    setReach(0);
     setShowFileDiffs(false);
   };
   const pane = { lines, blocks, rows: paneRows };
-  const scrollBy = (delta: number) => setScroll(settle(pane, top, top + delta));
+  const scrollBy = (delta: number) => {
+    if (delta < 0) setReach(0);
+    setScroll(settle(pane, top, top + delta));
+  };
   useInput(
     (input, key) => {
       if (input === "j" || input === "n" || key.rightArrow || key.return) {
@@ -119,13 +126,15 @@ export function Tour({
       else if (key.upArrow) scrollBy(-1);
       else if (input === " " || key.pageDown) setScroll(pageDown(pane, top));
       else if (input === "b" || key.pageUp) scrollBy(-(paneRows - 2));
-      else if (input === "g" || key.home) setScroll(0);
+      else if (input === "g" || key.home) scrollBy(-top);
       else if (input === "G" || key.end) setScroll(maxScroll);
       else if (input === "f" && filesAt !== null) {
-        // Either way the file list comes into view, so the toggle visibly does something.
+        // Either way the file list comes to the top row, so the toggle visibly does something.
+        setReach(filesAt + paneRows);
         setScroll(filesAt);
         setShowFileDiffs(!showFileDiffs);
-      } else if (/^[1-9]$/.test(input)) goTo(Number(input) - 1);
+        // Jumping is looking around, not reading: only → marks a stop read.
+      } else if (/^[1-9]$/.test(input)) goTo(Number(input) - 1, false);
     },
     { isActive: active },
   );
@@ -156,11 +165,12 @@ export function Tour({
           { text: String(position + 1), color: THEME.strong, bold: true },
           // Once the heading scrolls away without a rail, the title says more than the file count.
           // With the rail, the file count is already under the active stop.
+          // Without the rail, the read count rides along too.
           ...(showRail
             ? [{ text: ` of ${stopCount}`, color: THEME.muted }]
             : top === 0
-              ? [{ text: ` of ${stopCount}  ·  ${stopSubline(stop)}`, color: THEME.muted }]
-              : [{ text: ` of ${stopCount}  ·  `, color: THEME.muted }, { text: stop.title, color: THEME.text }]),
+              ? [{ text: ` of ${stopCount}  ·  ${seen.size} read  ·  ${stopSubline(stop)}`, color: THEME.muted }]
+              : [{ text: ` of ${stopCount}  ·  ${seen.size} read  ·  `, color: THEME.muted }, { text: stop.title, color: THEME.text }]),
         ];
   const counterRoom = keysAt - 13 - 2;
   const fitted = counter.reduce<{ spans: Array<Span>; used: number }>(
