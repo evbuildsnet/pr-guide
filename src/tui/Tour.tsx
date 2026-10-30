@@ -146,17 +146,18 @@ export function Tour({
   const first = position === 0;
   // A key that does nothing here drops its cap and dims, so it reads as resting, not broken.
   const key = (glyph: string, enabled: boolean): Span => (enabled ? chip(glyph) : { text: ` ${glyph} `, color: THEME.disabled });
-  // While the key list covers the stop, ? is the live key and the arrows rest.
+  // While the key list covers the stop, ? shows it's open; the arrows still work, so they stay as they are.
   const covered = cover !== undefined;
   const keys: Line = [
-    key("←", !first && !covered),
+    key("←", !first),
     { text: " " },
-    key("→", onward.kind !== "done" && !covered),
+    key("→", onward.kind !== "done"),
     { text: "  " },
     covered ? { ...chip("?"), color: THEME.background, bg: THEME.accent } : chip("?"),
   ];
   // Keys keep one place for the whole tour: the content's right edge.
   const keysAt = paneWidth - 1;
+  const readCount = seen.size > 0 ? `  ·  ${seen.size} read` : "";
   const counter: Line =
     stop === undefined
       ? []
@@ -165,14 +166,15 @@ export function Tour({
           { text: String(position + 1), color: THEME.strong, bold: true },
           // Once the heading scrolls away without a rail, the title says more than the file count.
           // With the rail, the file count is already under the active stop.
-          // Without the rail, the read count rides along too.
+          // Without the rail, the read count rides along too, once there is one.
           ...(showRail
             ? [{ text: ` of ${stopCount}`, color: THEME.muted }]
             : top === 0
-              ? [{ text: ` of ${stopCount}  ·  ${seen.size} read  ·  ${stopSubline(stop)}`, color: THEME.muted }]
-              : [{ text: ` of ${stopCount}  ·  ${seen.size} read  ·  `, color: THEME.muted }, { text: stop.title, color: THEME.text }]),
+              ? [{ text: ` of ${stopCount}${readCount}  ·  ${stopSubline(stop)}`, color: THEME.muted }]
+              : [{ text: ` of ${stopCount}${readCount}  ·  `, color: THEME.muted }, { text: stop.title, color: THEME.text }]),
         ];
-  const counterRoom = keysAt - 13 - 2;
+  // Two columns of air before the keys, however long the title.
+  const counterRoom = keysAt - 13 - 3;
   const fitted = counter.reduce<{ spans: Array<Span>; used: number }>(
     ({ spans, used }, span) => {
       const room = counterRoom - used;

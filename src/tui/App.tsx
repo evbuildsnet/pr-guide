@@ -219,13 +219,10 @@ function Help({ onward = "Next stop", stops = 9 }: { onward?: string; stops?: nu
     [],
     ...HELP.map(([keys, label], index): Line => {
       const shown = keys === "1–9" ? `1–${Math.min(stops, 9)}` : keys;
-      // A lone letter reads fine bare; stacked caps would merge into one bar.
-      const caps =
-        shown.length === 1
-          ? [{ text: ` ${shown} `, color: THEME.bright, bold: true }]
-          : shown.split("  ").flatMap((key, i) => [...(i > 0 ? [{ text: " " }] : []), chip(key)]);
+      // The card already says these are keys, so they go bare, alternates split by a dot.
+      const caps = shown.split("  ").flatMap((key, i) => [...(i > 0 ? [{ text: " · ", color: THEME.thumb }] : []), { text: key, color: THEME.bright, bold: true }]);
       const used = caps.reduce((sum, span) => sum + span.text.length, 0);
-      return [...caps, { text: " ".repeat(Math.max(18 - used, 1)) }, { text: index === 0 ? onward : label, color: THEME.text }];
+      return [...caps, { text: " ".repeat(Math.max(16 - used, 1)) }, { text: index === 0 ? onward : label, color: THEME.text }];
     }),
   ];
   return (

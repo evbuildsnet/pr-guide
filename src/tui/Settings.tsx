@@ -106,7 +106,7 @@ export function Settings({
         })}
       />
       <Lines lines={prose(`Uses your ${provider} CLI and its login. Changes save automatically and apply to the next guide.`, 72, { color: THEME.muted })} />
-      {written ? <Text color={THEME.muted}>{`This guide was written with ${describeChoice(written)}.`}</Text> : null}
+      {written ? <Lines lines={prose(`This guide was written with ${describeChoice(written)}.`, ROW_WIDTH, { color: THEME.muted })} /> : null}
     </Box>
   );
 }
