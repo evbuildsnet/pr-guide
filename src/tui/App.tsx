@@ -7,9 +7,9 @@ import { readGuide, STAGES, writeGuide, type Stage } from "../guide.ts";
 import { loadPullRequest, type PullRequest } from "../host.ts";
 import type { Guide } from "../model.ts";
 import { activeChoice, loadSettings } from "../settings.ts";
-import { THEME } from "./lines.ts";
+import { chip, MEASURE, THEME, type Line } from "./lines.ts";
 import { Settings } from "./Settings.tsx";
-import { Tour } from "./Tour.tsx";
+import { Lines, Tour } from "./Tour.tsx";
 
 type Screen =
   | { readonly kind: "loading" }
@@ -40,6 +40,7 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
   const [settings, setSettings] = useState(loadSettings);
   const [runOverride, setRunOverride] = useState(override);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [screen, setScreen] = useState<Screen>({ kind: "loading" });
   const abort = useRef<AbortController | null>(null);
 
@@ -88,6 +89,8 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
         setScreen(screen.previous ? { kind: "tour", pr: screen.pr, guide: screen.previous } : { kind: "intro", pr: screen.pr });
         return;
       }
+      if (helpOpen) return setHelpOpen(false);
+      if (input === "?") return setHelpOpen(true);
       if (input === "q" || (key.escape && screen.kind !== "writing")) return exit();
       if (input === "s" && screen.kind !== "writing") return setSettingsOpen(true);
       if (input === "o" && pr) return openUrl(pr.url);
@@ -102,43 +105,53 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
   const stale = screen.kind === "tour" && screen.guide.headSha !== screen.pr.headSha;
   const header = (
     <Box paddingX={1}>
-      <Box flexGrow={1} flexShrink={1}>
-        <Text wrap="truncate-end">
-          <Text bold color={THEME.accent}>pr-guide</Text>
-          {pr ? (
-            <>
-              <Text dimColor>{`  ${pr.repo}#${pr.number}  `}</Text>
-              <Text>{pr.title}</Text>
-            </>
-          ) : null}
-        </Text>
-      </Box>
-      <Box flexShrink={0} marginLeft={2}>
-        <Text dimColor>{describeChoice(screen.kind === "tour" && !settingsOpen ? screen.guide.choice : choice)}</Text>
-      </Box>
+      <Text wrap="truncate-end">
+        {pr ? (
+          <>
+            <Text color={THEME.muted}>{`${pr.repo} #${pr.number}  `}</Text>
+            <Text color={THEME.strong} bold>
+              {pr.title}
+            </Text>
+          </>
+        ) : (
+          <Text color={THEME.muted}>pr-guide</Text>
+        )}
+      </Text>
     </Box>
   );
 
-  const bodyRows = rows - 1 - (stale ? 1 : 0);
+  const bodyRows = rows - 2 - (stale ? 1 : 0);
+  const overlay = settingsOpen || helpOpen;
 
   return (
     <Box flexDirection="column" width={columns} height={rows}>
       {header}
-      {stale && !settingsOpen ? (
+      <Text color={THEME.border}>{"─".repeat(columns)}</Text>
+      {stale && !overlay ? (
         <Box paddingX={1}>
-          <Text color={THEME.attention} wrap="truncate-end">
-            {`The PR moved on since this guide was written (${screen.guide.headSha.slice(0, 7)} → ${screen.pr.headSha.slice(0, 7)}). r rewrites it.`}
-          </Text>
+          <Lines
+            lines={[
+              [
+                { text: "◆ ", color: THEME.attention },
+                { text: `The PR moved on since this guide was written (${screen.guide.headSha.slice(0, 7)} → ${screen.pr.headSha.slice(0, 7)})  `, color: THEME.attention },
+                chip("r"),
+                { text: " rewrite", color: THEME.muted },
+              ],
+            ]}
+          />
         </Box>
       ) : null}
       {screen.kind === "tour" ? (
-        <Box display={settingsOpen ? "none" : "flex"}>
-          <Tour key={screen.guide.generatedAt} guide={screen.guide} columns={columns} rows={bodyRows} active={!settingsOpen} />
+        <Box display={overlay ? "none" : "flex"}>
+          <Tour key={screen.guide.generatedAt} guide={screen.guide} columns={columns} rows={bodyRows} active={!overlay} />
         </Box>
       ) : null}
-      {settingsOpen ? (
+      {helpOpen ? (
+        <Help />
+      ) : settingsOpen ? (
         <Settings
           settings={settings}
+          written={screen.kind === "tour" ? screen.guide.choice : null}
           onChange={(next) => {
             setSettings(next);
             setRunOverride(null);
@@ -146,10 +159,46 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
           onClose={() => setSettingsOpen(false)}
         />
       ) : screen.kind === "tour" ? null : (
-        <Box flexDirection="column" paddingX={2} paddingY={1} gap={1}>
+        <Box flexDirection="column" paddingX={2} paddingY={1} gap={1} width={Math.min(columns, MEASURE + 4)}>
           <Body screen={screen} choice={choice} />
         </Box>
       )}
+    </Box>
+  );
+}
+
+const action = (key: string, label: string): Line => [chip(key), { text: `  ${label}`, color: THEME.text }];
+
+const HELP: ReadonlyArray<readonly [string, string]> = [
+  ["← →  j k", "Previous / next stop"],
+  ["1–9", "Jump to a stop"],
+  ["↑ ↓", "Scroll"],
+  ["space  b", "Page down / up"],
+  ["g  G", "Top / bottom of the stop"],
+  ["f", "Show or hide diffs of the stop's other files"],
+  ["o", "Open the PR in your browser"],
+  ["r", "Rewrite the guide"],
+  ["s", "Settings"],
+  ["q", "Quit"],
+];
+
+function Help() {
+  return (
+    <Box flexDirection="column" paddingX={2} paddingY={1} gap={1}>
+      <Text color={THEME.strong} bold>
+        Keys
+      </Text>
+      <Box flexDirection="column">
+        {HELP.map(([keys, label]) => (
+          <Box key={keys}>
+            <Box width={12}>
+              <Text color={THEME.accent}>{keys}</Text>
+            </Box>
+            <Text color={THEME.text}>{label}</Text>
+          </Box>
+        ))}
+      </Box>
+      <Text color={THEME.muted}>Any key closes this.</Text>
     </Box>
   );
 }
@@ -161,15 +210,13 @@ function Body({ screen, choice }: { screen: Exclude<Screen, { kind: "tour" }>; c
     case "intro":
       return (
         <>
-          <Text bold>A guided tour of this change</Text>
-          <Text>
+          <Text color={THEME.strong} bold>
+            A guided tour of this change
+          </Text>
+          <Text color={THEME.text}>
             {`${PROVIDERS[choice.provider].label} reads the diff in a separate read-only checkout and walks you through it in a few numbered stops: what changed, how it fits together, and where to look closely. It usually takes a few minutes.`}
           </Text>
-          <Text>
-            <Text color={THEME.accent}>enter</Text>
-            <Text>{` write the guide with ${describeChoice(choice)}`}</Text>
-          </Text>
-          <Text dimColor>s settings · o open PR · q quit</Text>
+          <Lines lines={[[...action("enter", "Write the guide"), { text: `  with ${describeChoice(choice)}`, color: THEME.muted }], [], action("s", "Change the model")]} />
         </>
       );
     case "writing":
@@ -177,11 +224,11 @@ function Body({ screen, choice }: { screen: Exclude<Screen, { kind: "tour" }>; c
     case "error":
       return (
         <>
-          <Text color="red" bold>
+          <Text color={THEME.danger} bold>
             Something went wrong
           </Text>
-          <Text>{screen.message}</Text>
-          <Text dimColor>r retry · s settings · q quit</Text>
+          <Text color={THEME.text}>{screen.message}</Text>
+          <Lines lines={[action("r", "Try again")]} />
         </>
       );
   }
@@ -192,7 +239,7 @@ function Spinner({ label }: { label: string }) {
   return (
     <Text>
       <Text color={THEME.accent}>{SPINNER[frame % SPINNER.length]}</Text>
-      {` ${label}`}
+      <Text color={THEME.text}>{` ${label}`}</Text>
     </Text>
   );
 }
@@ -204,22 +251,25 @@ function Writing({ stage }: { stage: Stage }) {
   const seconds = Math.floor(time / 1000);
   return (
     <>
-      <Text bold>Writing the guide</Text>
+      <Text color={THEME.strong} bold>
+        Writing the guide
+      </Text>
       <Box flexDirection="column">
         {stages.map((id, index) =>
           index < current ? (
             <Text key={id}>
               <Text color={THEME.success}>✓</Text>
-              {` ${STAGES[id]}`}
+              <Text color={THEME.text}>{` ${STAGES[id]}`}</Text>
             </Text>
           ) : index === current ? (
             <Spinner key={id} label={STAGES[id]} />
           ) : (
-            <Text key={id} dimColor>{`  ${STAGES[id]}`}</Text>
+            <Text key={id} color={THEME.muted}>{`  ${STAGES[id]}`}</Text>
           ),
         )}
       </Box>
-      <Text dimColor>{`${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")} · usually a few minutes · esc cancels`}</Text>
+      <Text color={THEME.muted}>{`${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")} · usually a few minutes`}</Text>
+      <Lines lines={[action("esc", "Cancel")]} />
     </>
   );
 }

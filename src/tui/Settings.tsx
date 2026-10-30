@@ -1,9 +1,10 @@
 import { Box, Text, useInput } from "ink";
 import { useState } from "react";
 
-import { EFFORTS, EFFORT_LABELS, PROVIDERS, PROVIDER_IDS, TIER_LABELS, tiersFor } from "../catalog.ts";
-import { activeChoice, sanitizeChoice, saveSettings, settingsPath, type Settings as SettingsData } from "../settings.ts";
-import { THEME } from "./lines.ts";
+import { describeChoice, EFFORTS, EFFORT_LABELS, PROVIDERS, PROVIDER_IDS, TIER_LABELS, tiersFor, type ModelChoice } from "../catalog.ts";
+import { activeChoice, sanitizeChoice, saveSettings, type Settings as SettingsData } from "../settings.ts";
+import { chip, THEME, type Line } from "./lines.ts";
+import { Lines } from "./Tour.tsx";
 
 interface Row {
   readonly label: string;
@@ -12,16 +13,21 @@ interface Row {
   readonly apply: (id: string) => SettingsData;
 }
 
+const ROW_WIDTH = 40;
+
 const cycle = <T,>(items: ReadonlyArray<T>, current: T, delta: number): T =>
   items[(items.indexOf(current) + delta + items.length) % items.length] ?? current;
 
 /** Provider, model, reasoning and speed, as in t3code's model picker. Saved on every change. */
 export function Settings({
   settings,
+  written,
   onChange,
   onClose,
 }: {
   settings: SettingsData;
+  /** The model the open guide was written with, if any. */
+  written: ModelChoice | null;
   onChange: (settings: SettingsData) => void;
   onClose: () => void;
 }) {
@@ -75,36 +81,32 @@ export function Settings({
 
   return (
     <Box flexDirection="column" paddingX={2} paddingY={1} gap={1}>
-      <Text bold>Settings</Text>
-      <Box flexDirection="column">
-        {rows.map((row, index) => {
+      <Text color={THEME.strong} bold>
+        Settings
+      </Text>
+      <Lines
+        lines={rows.map((row, index) => {
           const active = index === selected;
           const label = row.options.find((option) => option.id === row.current)?.label ?? row.current;
-          return (
-            <Box key={row.label}>
-              <Text color={active ? THEME.accent : undefined}>{active ? "› " : "  "}</Text>
-              <Box width={12}>
-                <Text dimColor={!active}>{row.label}</Text>
-              </Box>
-              {row.options.length < 2 ? (
-                <Text dimColor>
-                  {label}  only option for this model
-                </Text>
-              ) : (
-                <Text bold={active}>
-                  <Text dimColor>‹ </Text>
-                  {label}
-                  <Text dimColor> ›</Text>
-                </Text>
-              )}
-            </Box>
-          );
+          const fixed = row.options.length < 2;
+          const arrow = active && !fixed ? THEME.accent : THEME.faint;
+          const line: Line = [
+            { text: active ? "▌" : " ", color: THEME.accent },
+            { text: ` ${row.label.padEnd(12)}`, color: active ? THEME.strong : THEME.text, bold: active },
+            { text: fixed ? "  " : "‹ ", color: arrow },
+            { text: label, color: fixed ? THEME.muted : THEME.strong, bold: active },
+            { text: fixed ? "" : " ›", color: arrow },
+          ];
+          const width = line.reduce((sum, span) => sum + span.text.length, 0);
+          const padded: Line = [...line, { text: " ".repeat(Math.max(ROW_WIDTH - width, 0)) }];
+          return active ? padded.map((span) => ({ ...span, bg: THEME.selection })) : padded;
         })}
-      </Box>
-      <Text dimColor>
-        Runs your installed `{provider}` CLI with its own login. Saved to {settingsPath}
+      />
+      <Text color={THEME.muted}>
+        {`Uses your ${provider} CLI and its login. Changes save automatically and apply to the next guide.`}
+        {written ? `\nThis guide was written with ${describeChoice(written)}.` : ""}
       </Text>
-      <Text dimColor>↑↓ choose · ←→ change · enter done</Text>
+      <Lines lines={[[chip("enter"), { text: "  Done", color: THEME.text }]]} />
     </Box>
   );
 }

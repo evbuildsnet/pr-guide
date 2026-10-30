@@ -10,7 +10,7 @@ npx /path/to/pr-guide <PR or MR URL>     # from anywhere
 npx /path/to/pr-guide 27 --md > tour.md  # headless (also the default when piped)
 ```
 
-Tour keys: `j`/`k` stops · `↑↓` `space` `b` scroll · `1-9` jump · `f` file diffs · `o` open PR · `r` rewrite · `s` settings · `q` quit.
+Tour keys: `j`/`k` stops · `↑↓` `space` `b` scroll · `1-9` jump · `f` file diffs · `o` open PR · `r` rewrite · `s` settings · `?` keys · `q` quit.
 
 Needs `gh` or `glab`, and `claude` or `codex`, each logged in. The agent runs read-only in a temporary worktree at the PR head. If you're inside a clone of the repo, that clone is used; otherwise a blobless clone is cached in the system temp folder.
 

@@ -2,11 +2,12 @@ import { Box, Text, useInput } from "ink";
 import { useMemo, useState } from "react";
 
 import type { Guide } from "../model.ts";
-import { railLines, stopLines, type Line } from "./lines.ts";
+import { stopSubline } from "../tour.ts";
+import { chip, railLines, stopLines, THEME, type Line } from "./lines.ts";
 
-const RAIL_WIDTH = 34;
 /** Below this the rail hides, as t3code drops it on narrow panes. */
-const RAIL_MIN_COLUMNS = 100;
+const RAIL_MIN_COLUMNS = 110;
+const railWidth = (columns: number) => (columns >= 150 ? 34 : 28);
 
 export function Lines({ lines }: { lines: ReadonlyArray<Line> }) {
   return (
@@ -16,7 +17,7 @@ export function Lines({ lines }: { lines: ReadonlyArray<Line> }) {
           {line.length === 0
             ? " "
             : line.map((span, spanIndex) => (
-                <Text key={spanIndex} color={span.color} backgroundColor={span.bg} bold={span.bold} dimColor={span.dim}>
+                <Text key={spanIndex} color={span.color} backgroundColor={span.bg} bold={span.bold} italic={span.italic}>
                   {span.text}
                 </Text>
               ))}
@@ -24,6 +25,14 @@ export function Lines({ lines }: { lines: ReadonlyArray<Line> }) {
       ))}
     </>
   );
+}
+
+/** A one-column scrollbar: a thumb sized to the visible share of the stop. */
+function scrollbar(rows: number, total: number, top: number): string {
+  if (total <= rows) return "";
+  const size = Math.max(Math.round((rows / total) * rows), 1);
+  const start = Math.round((top / (total - rows)) * (rows - size));
+  return Array.from({ length: rows }, (_, i) => (i >= start && i < start + size ? "┃" : " ")).join("\n");
 }
 
 export function Tour({
@@ -46,15 +55,18 @@ export function Tour({
   const stopCount = guide.stops.length;
   const stop = guide.stops[position];
   const showRail = columns >= RAIL_MIN_COLUMNS;
-  const paneRows = Math.max(rows - 1, 1);
-  const paneWidth = Math.max(columns - (showRail ? RAIL_WIDTH + 2 : 0) - 3, 20);
+  const rail = showRail ? railWidth(columns) : 0;
+  // The stop counter stays pinned above the scrolling pane.
+  const paneRows = Math.max(rows - 2, 1);
+  // Rail, divider and its margin, pane padding, scrollbar.
+  const paneWidth = Math.max(columns - (showRail ? rail + 2 : 0) - 3, 20);
 
-  const lines = useMemo(
+  const { lines, filesAt } = useMemo(
     () =>
       stop === undefined
-        ? [[{ text: "This change has no files to tour.", dim: true }]]
+        ? { lines: [[{ text: "This change has no files to tour.", color: THEME.muted }]], filesAt: null }
         : stopLines(
-            { stop, index: position, count: stopCount, nextTitle: guide.stops[position + 1]?.title ?? null, files, showFileDiffs },
+            { stop, isLast: position === stopCount - 1, nextTitle: guide.stops[position + 1]?.title ?? null, files, showFileDiffs },
             paneWidth,
           ),
     [stop, position, stopCount, guide, files, showFileDiffs, paneWidth],
@@ -68,6 +80,7 @@ export function Tour({
     if (clamped > position) setSeen((current) => new Set(current).add(position));
     setPosition(clamped);
     setScroll(0);
+    setShowFileDiffs(false);
   };
   const scrollBy = (delta: number) => setScroll(Math.max(Math.min(top + delta, maxScroll), 0));
 
@@ -84,38 +97,53 @@ export function Tour({
       else if (input === "b" || key.pageUp) scrollBy(-(paneRows - 2));
       else if (input === "g" || key.home) setScroll(0);
       else if (input === "G" || key.end) setScroll(maxScroll);
-      else if (input === "f") setShowFileDiffs((current) => !current);
-      else if (/^[1-9]$/.test(input)) goTo(Number(input) - 1);
+      else if (input === "f" && filesAt !== null) {
+        // Bring the file list into view so the toggle visibly does something.
+        setShowFileDiffs((current) => !current);
+        setScroll(filesAt);
+      } else if (/^[1-9]$/.test(input)) goTo(Number(input) - 1);
     },
     { isActive: active },
   );
 
-  const progress = maxScroll === 0 ? "" : top === 0 ? "top" : top >= maxScroll ? "end" : `${Math.round((top / maxScroll) * 100)}%`;
-  const hints = "j/k stops · ↑↓ space scroll · 1-9 jump · f files · o open PR · r rewrite · s settings · q quit";
+  const railView = useMemo(() => railLines({ stops: guide.stops, position, seen }, rail - 1), [guide, position, seen, rail]);
+  // Keeps the active stop in view on short terminals.
+  const railTop = Math.max(Math.min(railView.activeStart, railView.activeEnd + 2 - (rows - 1)), 0);
+
+  const counter: Line =
+    stop === undefined
+      ? []
+      : [
+          { text: `Stop ${position + 1} of ${stopCount}`, color: THEME.muted },
+          { text: `  ·  ${stopSubline(stop)}`, color: THEME.muted },
+        ];
+  const keys: Line = [chip("←"), { text: " " }, chip("→"), { text: "   " }, chip("?")];
+  const counterWidth = counter.reduce((sum, span) => sum + span.text.length, 0);
 
   return (
-    <Box flexDirection="column">
-      <Box flexDirection="row" height={paneRows}>
-        {showRail ? (
-          <>
-            <Box flexDirection="column" width={RAIL_WIDTH} paddingLeft={1} overflow="hidden">
-              <Lines lines={railLines({ stops: guide.stops, position, seen }, RAIL_WIDTH - 1).slice(0, paneRows)} />
-            </Box>
-            <Box width={1} marginRight={1} flexDirection="column" overflow="hidden">
-              <Text dimColor>{"│\n".repeat(paneRows).trimEnd()}</Text>
-            </Box>
-          </>
-        ) : null}
-        <Box flexDirection="column" width={paneWidth + 1} paddingLeft={1} overflow="hidden">
-          <Lines lines={lines.slice(top, top + paneRows)} />
+    <Box flexDirection="row" height={rows}>
+      {showRail ? (
+        <>
+          <Box flexDirection="column" width={rail} paddingLeft={1} overflow="hidden">
+            <Lines lines={railView.lines.slice(railTop, railTop + rows)} />
+          </Box>
+          <Box width={1} marginRight={1} flexDirection="column" overflow="hidden">
+            <Text color={THEME.border}>{"│\n".repeat(rows).trimEnd()}</Text>
+          </Box>
+        </>
+      ) : null}
+      <Box flexDirection="column" paddingLeft={1}>
+        <Box width={paneWidth + 1} overflow="hidden">
+          <Lines lines={[[...counter, { text: " ".repeat(Math.max(paneWidth - counterWidth - 13, 1)) }, ...keys]]} />
         </Box>
-      </Box>
-      <Box paddingX={1}>
-        <Box flexGrow={1} flexShrink={1}>
-          <Text dimColor wrap="truncate-end">{hints}</Text>
-        </Box>
-        <Box flexShrink={0} marginLeft={2}>
-          <Text dimColor>{progress}</Text>
+        <Box height={1} />
+        <Box flexDirection="row" height={paneRows}>
+          <Box flexDirection="column" width={paneWidth} overflow="hidden">
+            <Lines lines={lines.slice(top, top + paneRows)} />
+          </Box>
+          <Box width={1} flexDirection="column" overflow="hidden">
+            <Text color={THEME.faint}>{scrollbar(paneRows, lines.length, top)}</Text>
+          </Box>
         </Box>
       </Box>
     </Box>
