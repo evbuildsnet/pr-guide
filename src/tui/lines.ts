@@ -33,6 +33,7 @@ export const THEME = {
   success: "#98c379",
   danger: "#e06c75",
   border: "#3e4451",
+  rule: "#4b5263",
   selection: "#323844",
   chip: "#3e4451",
   codeBg: "#21252b",
@@ -68,17 +69,18 @@ export function inline(text: string, base: Style = {}): Array<Span> {
 export function prose(text: string, wrapAt: number, base: Style = { color: THEME.text }, indent = ""): Array<Line> {
   const lines: Array<Line> = [];
   for (const paragraph of text.trim().split("\n")) {
-    // Each word is the spans between two whitespace runs.
-    const words: Array<Array<Span>> = [[]];
+    // Each word is the spans between two whitespace runs. A word that continues an inline code span
+    // keeps that span's background on the space before it, so `a = b` stays one chip.
+    const words: Array<{ spans: Array<Span>; joinBg?: string }> = [{ spans: [] }];
     for (const span of inline(paragraph, base)) {
       span.text.split(/(\s+)/).forEach((piece) => {
-        if (/^\s+$/.test(piece)) words.push([]);
-        else if (piece !== "") words.at(-1)!.push({ ...span, text: piece });
+        if (/^\s+$/.test(piece)) words.push({ spans: [], joinBg: span.bg });
+        else if (piece !== "") words.at(-1)!.spans.push({ ...span, text: piece });
       });
     }
     let line: Array<Span> = indent ? [{ text: indent }] : [];
     let length = indent.length;
-    for (const word of words.filter((spans) => spans.length > 0)) {
+    for (const { spans: word, joinBg } of words.filter(({ spans }) => spans.length > 0)) {
       const wordLength = width(word);
       if (length > indent.length) {
         if (length + 1 + wordLength > wrapAt) {
@@ -86,7 +88,7 @@ export function prose(text: string, wrapAt: number, base: Style = { color: THEME
           line = indent ? [{ text: indent }] : [];
           length = indent.length;
         } else {
-          line.push({ text: " " });
+          line.push({ text: " ", bg: joinBg });
           length += 1;
         }
       }
@@ -253,15 +255,19 @@ interface Header {
   /** What the block shows, as the first rows of the band, so caption, path and code read as one card. */
   readonly caption?: string;
   readonly lead?: string;
+  /** Right-aligned on the path row, e.g. the key that collapses it. */
+  readonly trailing?: Line;
 }
 
 /** A file's band: an optional caption, then the path, range and counts. The path row is last. */
-function blockHeader({ path, detail = "", counts, caption = "", lead = " " }: Header, total: number, measure: number): Array<Line> {
+function blockHeader({ path, detail = "", counts, caption = "", lead = " ", trailing = [] }: Header, total: number, measure: number): Array<Line> {
   const band = (line: Line) => pad(withBg(line, THEME.headerBg), total, THEME.headerBg);
   const tail: Line = [...(detail ? [{ text: `  ${detail}`, color: THEME.muted }] : []), ...(counts ? [{ text: "  " }, ...stats(counts)] : [])];
+  const right = width(trailing) > 0 ? width(trailing) + 1 : 0;
+  const left: Line = [{ text: lead, color: THEME.muted }, ...pathSpans(fitPath(path, total - lead.length - width(tail) - right - 1)), ...tail];
   return [
     ...(caption.trim() ? prose(caption, measure, undefined, " ").map(band) : []),
-    band([{ text: lead, color: THEME.muted }, ...pathSpans(fitPath(path, total - lead.length - width(tail) - 1)), ...tail]),
+    band(right > 0 ? [...left, { text: " ".repeat(Math.max(total - width(left) - right, 1)) }, ...trailing] : left),
   ];
 }
 
@@ -296,13 +302,15 @@ function fileCode(file: DiffFile, gutter: number, total: number, measure: number
 export interface StopView {
   readonly stop: Stop;
   readonly isLast: boolean;
+  /** Stops other than this one the reader hasn't read. */
+  readonly unread: number;
   readonly nextTitle: string | null;
   readonly files: ReadonlyMap<string, DiffFile>;
   readonly showFileDiffs: boolean;
 }
 
 /** Draws one stop the way t3code's GuideStop lays it out, top to bottom. `filesAt` is the row of the file list. */
-export function stopLines({ stop, isLast, nextTitle, files, showFileDiffs }: StopView, total: number) {
+export function stopLines({ stop, isLast, unread, nextTitle, files, showFileDiffs }: StopView, total: number) {
   // Code blocks by line range, so a block scrolled partly away can pin its header.
   const blocks: Array<{ header: number; end: number }> = [];
   const measure = Math.min(total, MEASURE);
@@ -381,8 +389,8 @@ export function stopLines({ stop, isLast, nextTitle, files, showFileDiffs }: Sto
       const counts = file ? [{ text: "  " }, ...stats(file)] : [];
       out.push(
         ...(showFileDiffs
-          ? blockHeader({ path: other.path, counts: file ?? null, lead: "▾ " }, total, measure)
-          : [[{ text: "▸ ", color: THEME.muted }, ...pathSpans(fitPath(other.path, total - 2 - width(counts))), ...counts]]),
+          ? blockHeader({ path: other.path, counts: file ?? null, trailing: [chip("f ▾")] }, total, measure)
+          : [[...pathSpans(fitPath(other.path, total - width(counts))), ...counts]]),
       );
       if (other.note.trim() !== "") out.push(...prose(other.note, measure, { color: THEME.muted }, "  "));
       if (showFileDiffs) {
@@ -406,14 +414,22 @@ export function stopLines({ stop, isLast, nextTitle, files, showFileDiffs }: Sto
     }
   }
 
-  out.push(BLANK, [{ text: "─".repeat(total), color: THEME.border }]);
+  out.push(BLANK, [{ text: "─".repeat(total), color: THEME.rule }]);
   out.push(
     ...(nextTitle !== null
-      ? prose(nextTitle, Math.min(total, MEASURE + 9), { color: THEME.strong, bold: true }, " ".repeat(9)).map((line, i) =>
+      ? prose(nextTitle, Math.min(total, MEASURE + 9), { color: THEME.text, bold: true }, " ".repeat(9)).map((line, i) =>
           i === 0 ? [chip("→"), { text: "  Next  ", color: THEME.muted }, ...line.slice(1)] : line,
         )
       : isLast
-        ? [[{ text: "That's the tour.  ", color: THEME.strong, bold: true }, chip("o"), { text: "  Open the PR", color: THEME.text }]]
+        ? [
+            [
+              { text: "That's the tour", color: THEME.strong, bold: true },
+              ...(unread > 0 ? [{ text: ` · ${unread} ${unread === 1 ? "stop" : "stops"} unread`, color: THEME.attention }] : []),
+              { text: "   " },
+              chip("o"),
+              { text: "  Open the PR", color: THEME.text },
+            ],
+          ]
         : []),
   );
   return { lines: out, filesAt, blocks };
@@ -443,14 +459,16 @@ export function railLines({ stops, position, seen }: RailView, railWidth: number
       const row: Line = [{ text: active ? "▌" : " ", color: THEME.accent }, ...line];
       return active ? pad(withBg(row, THEME.selection), railWidth, THEME.selection) : row;
     };
-    const bullet: Span = read
-      ? { text: " ✔ ", color: THEME.success }
-      : { text: `${String(index + 1).padStart(2)} `, color: active ? THEME.strong : THEME.muted };
+    // The number stays, since 1–9 jump to it; a check beside it marks a read stop.
+    const bullet: Line = [
+      { text: read ? "✔" : " ", color: THEME.success },
+      { text: `${String(index + 1).padStart(2)} `, color: active ? THEME.strong : THEME.muted },
+    ];
     const titleStyle: Style = { color: active ? THEME.strong : THEME.soft, bold: active };
-    const wrapped = prose(stop.title, railWidth - 5, titleStyle);
+    const wrapped = prose(stop.title, railWidth - 6, titleStyle);
     const title = wrapped.length > 3 && !active ? [...wrapped.slice(0, 2), [...(wrapped[2] ?? []), { ...titleStyle, text: "…" }]] : wrapped;
     if (active) activeStart = out.length;
-    title.forEach((line, i) => out.push(paint([i === 0 ? bullet : { text: "   " }, { text: " " }, ...line])));
+    title.forEach((line, i) => out.push(paint([...(i === 0 ? bullet : [{ text: "    " }]), { text: " " }, ...line])));
     out.push(
       paint([
         { text: "    " },

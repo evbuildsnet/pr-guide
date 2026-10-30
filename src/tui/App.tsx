@@ -84,12 +84,12 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
   useInput(
     (input, key) => {
       const pr = screen.kind === "loading" ? null : screen.pr;
+      if (helpOpen) return input === "q" ? exit() : setHelpOpen(false);
       if (screen.kind === "writing" && key.escape) {
         abort.current?.abort();
         setScreen(screen.previous ? { kind: "tour", pr: screen.pr, guide: screen.previous } : { kind: "intro", pr: screen.pr });
         return;
       }
-      if (helpOpen && input !== "q") return setHelpOpen(false);
       if (input === "?") return setHelpOpen(true);
       // Esc only ever closes things; quitting takes q.
       if (input === "q") return exit();
@@ -109,10 +109,8 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
       <Text wrap="truncate-end">
         {pr ? (
           <>
-            <Text color={THEME.muted}>{`${pr.repo} #${pr.number}  `}</Text>
-            <Text color={THEME.strong} bold>
-              {pr.title}
-            </Text>
+            <Text color={THEME.faint}>{`${pr.repo} #${pr.number}  `}</Text>
+            <Text color={THEME.soft}>{pr.title}</Text>
           </>
         ) : (
           <Text color={THEME.muted}>pr-guide</Text>
@@ -175,7 +173,7 @@ const HELP: ReadonlyArray<readonly [string, string]> = [
   ["→  j  enter", "Next stop"],
   ["←  k", "Previous stop"],
   ["1–9", "Jump to a stop"],
-  ["↑ ↓", "Scroll"],
+  ["↑  ↓", "Scroll"],
   ["space  b", "Page down / up"],
   ["g  G", "Top / bottom of the stop"],
   ["f", "Show or hide the other files' diffs"],
@@ -188,15 +186,17 @@ const HELP: ReadonlyArray<readonly [string, string]> = [
 /** The key list, as a card in the main pane. */
 function Help() {
   const rows: Array<Line> = [
-    [{ text: "Keys", color: THEME.strong, bold: true }],
+    [{ text: "Keys", color: THEME.strong, bold: true }, { text: " ".repeat(48) }, chip("esc")],
     [],
-    ...HELP.map(([keys, label]): Line => [{ text: keys.padEnd(14), color: THEME.accent }, { text: label, color: THEME.text }]),
-    [],
-    [{ text: "Any key closes this", color: THEME.muted }],
+    ...HELP.map(([keys, label]): Line => {
+      const caps = keys.split("  ").flatMap((key, i) => [...(i > 0 ? [{ text: " " }] : []), chip(key)]);
+      const used = caps.reduce((sum, span) => sum + span.text.length, 0);
+      return [...caps, { text: " ".repeat(Math.max(18 - used, 1)) }, { text: label, color: THEME.text }];
+    }),
   ];
   return (
     <Box paddingX={2} paddingY={1}>
-      <Lines lines={card([[], ...rows, []], 60, THEME.accent)} />
+      <Lines lines={card([[], ...rows, []], 60, THEME.border)} />
     </Box>
   );
 }

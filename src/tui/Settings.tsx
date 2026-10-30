@@ -3,7 +3,7 @@ import { useState } from "react";
 
 import { describeChoice, EFFORTS, EFFORT_LABELS, PROVIDERS, PROVIDER_IDS, TIER_LABELS, tiersFor, type ModelChoice } from "../catalog.ts";
 import { activeChoice, sanitizeChoice, saveSettings, type Settings as SettingsData } from "../settings.ts";
-import { chip, THEME, type Line } from "./lines.ts";
+import { chip, prose, THEME, type Line } from "./lines.ts";
 import { Lines } from "./Tour.tsx";
 
 interface Row {
@@ -103,9 +103,7 @@ export function Settings({
           return active ? padded.map((span) => ({ ...span, bg: THEME.selection })) : padded;
         })}
       />
-      <Box width={72}>
-        <Text color={THEME.muted}>{`Uses your ${provider} CLI and its login. Changes save automatically and apply to the next guide.`}</Text>
-      </Box>
+      <Lines lines={prose(`Uses your ${provider} CLI and its login. Changes save automatically and apply to the next guide.`, 72, { color: THEME.muted })} />
       {written ? <Text color={THEME.muted}>{`This guide was written with ${describeChoice(written)}.`}</Text> : null}
     </Box>
   );

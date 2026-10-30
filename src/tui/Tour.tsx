@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 
 import type { Guide } from "../model.ts";
 import { stopSubline } from "../tour.ts";
-import { chip, MEASURE, railLines, stopLines, THEME, type Line, type Span } from "./lines.ts";
+import { chip, railLines, stopLines, THEME, type Line, type Span } from "./lines.ts";
 
 /** The rail hides, as t3code drops it on narrow panes, when keeping it would leave code less than this. */
 const CODE_MIN_COLUMNS = 96;
@@ -74,10 +74,18 @@ export function Tour({
       stop === undefined
         ? { lines: [[{ text: "This change has no files to tour.", color: THEME.muted }]], filesAt: null, blocks: [] }
         : stopLines(
-            { stop, isLast: position === stopCount - 1, nextTitle: guide.stops[position + 1]?.title ?? null, files, showFileDiffs },
-            paneWidth,
+            {
+              stop,
+              isLast: position === stopCount - 1,
+              unread: guide.stops.filter((_, index) => index !== position && !seen.has(index)).length,
+              nextTitle: guide.stops[position + 1]?.title ?? null,
+              files,
+              showFileDiffs,
+            },
+            // A column of air before the scrollbar.
+            paneWidth - 1,
           ),
-    [stop, position, stopCount, guide, files, showFileDiffs, paneWidth],
+    [stop, position, stopCount, guide, files, showFileDiffs, paneWidth, seen],
   );
   const maxScroll = Math.max(lines.length - paneRows, 0);
   const top = Math.min(scroll, maxScroll);
@@ -121,9 +129,10 @@ export function Tour({
   const first = position === 0;
   const last = position === stopCount - 1;
   const key = (glyph: string, enabled: boolean): Span => (enabled ? chip(glyph) : { ...chip(glyph), color: THEME.disabled, bg: THEME.headerBg, bold: false });
-  const keys: Line = [key("←", !first), { text: " " }, key("→", !last), { text: "  " }, chip("?")];
+  // On the last stop → finishes the tour, so it stays live until that stop is read.
+  const keys: Line = [key("←", !first), { text: " " }, key("→", !last || !seen.has(position)), { text: "  " }, chip("?")];
   // Keys line up with the prose's right edge. Without the rail, the stop title fills the gap once it scrolls away.
-  const keysAt = Math.min(MEASURE, paneWidth);
+  const keysAt = paneWidth - 1;
   const counter: Line =
     stop === undefined
       ? []
