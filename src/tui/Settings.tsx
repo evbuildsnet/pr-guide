@@ -24,12 +24,14 @@ export function Settings({
   written,
   onChange,
   onClose,
+  onQuit,
 }: {
   settings: SettingsData;
   /** The model the open guide was written with, if any. */
   written: ModelChoice | null;
   onChange: (settings: SettingsData) => void;
   onClose: () => void;
+  onQuit: () => void;
 }) {
   const [selected, setSelected] = useState(0);
   const choice = activeChoice(settings);
@@ -67,7 +69,8 @@ export function Settings({
   ];
 
   useInput((input, key) => {
-    if (key.escape || key.return || input === "s" || input === "q") return onClose();
+    if (input === "q") return onQuit();
+    if (key.escape || key.return || input === "s") return onClose();
     if (key.upArrow || input === "k") setSelected((current) => (current + rows.length - 1) % rows.length);
     if (key.downArrow || input === "j") setSelected((current) => (current + 1) % rows.length);
     const delta = key.leftArrow || input === "h" ? -1 : key.rightArrow || input === "l" || input === " " ? 1 : 0;
@@ -100,10 +103,10 @@ export function Settings({
           return active ? padded.map((span) => ({ ...span, bg: THEME.selection })) : padded;
         })}
       />
-      <Text color={THEME.muted}>
-        {`Uses your ${provider} CLI and its login. Changes save automatically and apply to the next guide.`}
-        {written ? `\nThis guide was written with ${describeChoice(written)}.` : ""}
-      </Text>
+      <Box width={72}>
+        <Text color={THEME.muted}>{`Uses your ${provider} CLI and its login. Changes save automatically and apply to the next guide.`}</Text>
+      </Box>
+      {written ? <Text color={THEME.muted}>{`This guide was written with ${describeChoice(written)}.`}</Text> : null}
     </Box>
   );
 }

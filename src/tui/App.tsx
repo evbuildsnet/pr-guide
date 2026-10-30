@@ -7,7 +7,7 @@ import { readGuide, STAGES, writeGuide, type Stage } from "../guide.ts";
 import { loadPullRequest, type PullRequest } from "../host.ts";
 import type { Guide } from "../model.ts";
 import { activeChoice, loadSettings } from "../settings.ts";
-import { chip, MEASURE, THEME, type Line } from "./lines.ts";
+import { card, chip, MEASURE, THEME, type Line } from "./lines.ts";
 import { Settings } from "./Settings.tsx";
 import { Lines, Tour } from "./Tour.tsx";
 
@@ -89,7 +89,7 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
         setScreen(screen.previous ? { kind: "tour", pr: screen.pr, guide: screen.previous } : { kind: "intro", pr: screen.pr });
         return;
       }
-      if (helpOpen) return setHelpOpen(false);
+      if (helpOpen && input !== "q") return setHelpOpen(false);
       if (input === "?") return setHelpOpen(true);
       // Esc only ever closes things; quitting takes q.
       if (input === "q") return exit();
@@ -158,6 +158,7 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
             setRunOverride(null);
           }}
           onClose={() => setSettingsOpen(false)}
+          onQuit={exit}
         />
       ) : screen.kind === "tour" ? null : (
         <Box flexDirection="column" paddingX={2} paddingY={1} gap={1} width={Math.min(columns, MEASURE + 4)}>
@@ -177,30 +178,25 @@ const HELP: ReadonlyArray<readonly [string, string]> = [
   ["↑ ↓", "Scroll"],
   ["space  b", "Page down / up"],
   ["g  G", "Top / bottom of the stop"],
-  ["f", "Show or hide diffs of the stop's other files"],
+  ["f", "Show or hide the other files' diffs"],
   ["o", "Open the PR in your browser"],
   ["r", "Rewrite the guide"],
   ["s", "Settings"],
   ["q", "Quit"],
 ];
 
+/** The key list, as a card in the main pane. */
 function Help() {
+  const rows: Array<Line> = [
+    [{ text: "Keys", color: THEME.strong, bold: true }],
+    [],
+    ...HELP.map(([keys, label]): Line => [{ text: keys.padEnd(14), color: THEME.accent }, { text: label, color: THEME.text }]),
+    [],
+    [{ text: "Any key closes this", color: THEME.muted }],
+  ];
   return (
-    <Box flexDirection="column" paddingX={2} paddingY={1} gap={1}>
-      <Text color={THEME.strong} bold>
-        Keys
-      </Text>
-      <Box flexDirection="column">
-        {HELP.map(([keys, label]) => (
-          <Box key={keys}>
-            <Box width={14}>
-              <Text color={THEME.accent}>{keys}</Text>
-            </Box>
-            <Text color={THEME.text}>{label}</Text>
-          </Box>
-        ))}
-      </Box>
-      <Text color={THEME.muted}>Any key closes this.</Text>
+    <Box paddingX={2} paddingY={1}>
+      <Lines lines={card([[], ...rows, []], 60, THEME.accent)} />
     </Box>
   );
 }

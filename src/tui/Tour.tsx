@@ -35,10 +35,10 @@ function scrollbar(rows: number, total: number, top: number): ReadonlyArray<Line
   const track = rows - 2;
   const size = Math.max(Math.round((rows / total) * track), 1);
   const start = Math.round((top / (total - rows)) * (track - size));
-  const end = (more: boolean, glyph: string): Line => [{ text: more ? glyph : " ", color: THEME.muted }];
+  const end = (more: boolean, glyph: string): Line => [{ text: more ? glyph : " ", color: THEME.faint }];
   return [
     end(top > 0, "↑"),
-    ...Array.from({ length: track }, (_, i): Line => [{ text: i >= start && i < start + size ? "┃" : " ", color: THEME.faint }]),
+    ...Array.from({ length: track }, (_, i): Line => [{ text: i >= start && i < start + size ? "┃" : " ", color: THEME.disabled }]),
     end(top < total - rows, "↓"),
   ];
 }
@@ -130,8 +130,10 @@ export function Tour({
       : [
           { text: "Stop ", color: THEME.muted },
           { text: String(position + 1), color: THEME.strong, bold: true },
-          { text: ` of ${stopCount}  ·  ${stopSubline(stop)}`, color: THEME.muted },
-          ...(showRail || top === 0 ? [] : [{ text: `  ·  ${stop.title}`, color: THEME.text }]),
+          // Once the heading scrolls away without a rail, the title says more than the file count.
+          ...(showRail || top === 0
+            ? [{ text: ` of ${stopCount}  ·  ${stopSubline(stop)}`, color: THEME.muted }]
+            : [{ text: ` of ${stopCount}  ·  `, color: THEME.muted }, { text: stop.title, color: THEME.text }]),
         ];
   const counterRoom = keysAt - 13 - 2;
   const fitted = counter.reduce<{ spans: Array<Span>; used: number }>(

@@ -25,8 +25,10 @@ export const THEME = {
   faint: "#8b93a1",
   disabled: "#5c6370",
   accent: "#61afef",
-  code: "#8bd5ca",
-  codeChip: "#323844",
+  /** Rail titles that aren't selected: quieter than body text so the rail doesn't compete with it. */
+  soft: "#abb2bf",
+  code: "#e6e8ec",
+  codeChip: "#3e4451",
   attention: "#e5c07b",
   success: "#98c379",
   danger: "#e06c75",
@@ -36,8 +38,9 @@ export const THEME = {
   codeBg: "#21252b",
   headerBg: "#2c313a",
   noteBg: "#2c313a",
-  addition: { sign: "#98c379", bg: "#263229" },
-  deletion: { sign: "#e06c75", bg: "#36272b" },
+  // Removed lines keep their old-file number, dimmer so it reads as another coordinate, not a miscount.
+  addition: { sign: "#98c379", number: "#98c379", bg: "#263229" },
+  deletion: { sign: "#e06c75", number: "#b0646e", bg: "#36272b" },
   syntax: { comment: "#8f98a6", string: "#98c379", number: "#d19a66", keyword: "#c678dd", plain: undefined },
 } as const satisfies Record<string, unknown> & { syntax: Record<Token, string | undefined> };
 
@@ -192,10 +195,10 @@ function codeLines({ path, segments, side, gutter, notesAt }: CodeBlock, total: 
             withBg(
               [
                 ...(markers
-                  ? [{ text: ` ${markers} `, color: "#1d1f21", bg: THEME.attention, bold: true }, { text: " ".repeat(lane - markers.length - 2) }]
+                  ? [{ text: ` ${markers} `, color: "#1d1f21", bg: THEME.accent, bold: true }, { text: " ".repeat(lane - markers.length - 2) }]
                   : [{ text: " ".repeat(lane) }]),
                 { text: first && tone ? (row.kind === "addition" ? "+ " : "− ") : "  ", color: tone?.sign },
-                { text: first ? String(numberOf(row) ?? "").padStart(gutter) : " ".repeat(gutter), color: tone ? tone.sign : THEME.faint },
+                { text: first ? String(numberOf(row) ?? "").padStart(gutter) : " ".repeat(gutter), color: tone ? tone.number : THEME.faint },
                 { text: first ? "  " : " ↪", color: THEME.faint },
                 ...piece,
               ],
@@ -212,17 +215,16 @@ function codeLines({ path, segments, side, gutter, notesAt }: CodeBlock, total: 
   return out;
 }
 
-/** A filled card with an amber rule: the shape of everything that asks for the reader's judgment. */
-function card(rows: ReadonlyArray<Line>, cardWidth: number, padded = true): Array<Line> {
-  const fill = (line: Line): Line => pad(withBg([{ text: "┃ ", color: THEME.attention }, ...line], THEME.noteBg), cardWidth, THEME.noteBg);
-  return [...(padded ? [fill([])] : []), ...rows.map(fill)];
+/** A filled card with a colored rule: amber asks for the reader's judgment, blue explains. */
+export function card(rows: ReadonlyArray<Line>, cardWidth: number, rule: string = THEME.attention): Array<Line> {
+  return rows.map((line) => pad(withBg([{ text: "┃ ", color: rule }, ...line], THEME.noteBg), cardWidth, THEME.noteBg));
 }
 
 /** A note drawn under the line it is about, like an inline review comment. */
 function noteCard(marker: string, note: Note, indent: number, total: number, measure: number): Array<Line> {
   const cardWidth = Math.min(measure, total - indent + 2);
   const body = note.body.trim() === "" ? [] : prose(note.body, cardWidth - 3);
-  const rows = card([...markedTitle(marker, note.title, cardWidth - 3), ...body], cardWidth, false);
+  const rows = card([...markedTitle(marker, note.title, cardWidth - 3), ...body], cardWidth, THEME.accent);
   return rows.map((line) => pad(withBg([{ text: " ".repeat(indent - 2) }, ...line], THEME.codeBg), total, THEME.codeBg));
 }
 
@@ -231,7 +233,7 @@ function markedTitle(marker: string, title: string, wrapAt: number): Array<Line>
   const chipText = ` ${marker} `;
   const indent = " ".repeat(chipText.length + 1);
   return prose(title, wrapAt, { color: THEME.strong, bold: true }, indent).map((line, i) =>
-    i === 0 ? [{ text: chipText, color: "#1d1f21", bg: THEME.attention, bold: true }, { text: " " }, ...line.slice(1)] : line,
+    i === 0 ? [{ text: chipText, color: "#1d1f21", bg: THEME.accent, bold: true }, { text: " " }, ...line.slice(1)] : line,
   );
 }
 
@@ -244,16 +246,23 @@ function fitPath(path: string, room: number): string {
   return keep > 0 ? `…/${dir.slice(dir.length - keep).replace(/^[^/]*\//, "")}${name}` : name;
 }
 
-function blockHeader(
-  path: string,
-  detail: string,
-  counts: { additions: number; deletions: number } | null,
-  total: number,
-  lead = " ",
-): Line {
+interface Header {
+  readonly path: string;
+  readonly detail?: string;
+  readonly counts: { additions: number; deletions: number } | null;
+  /** What the block shows, as the first rows of the band, so caption, path and code read as one card. */
+  readonly caption?: string;
+  readonly lead?: string;
+}
+
+/** A file's band: an optional caption, then the path, range and counts. The path row is last. */
+function blockHeader({ path, detail = "", counts, caption = "", lead = " " }: Header, total: number, measure: number): Array<Line> {
+  const band = (line: Line) => pad(withBg(line, THEME.headerBg), total, THEME.headerBg);
   const tail: Line = [...(detail ? [{ text: `  ${detail}`, color: THEME.muted }] : []), ...(counts ? [{ text: "  " }, ...stats(counts)] : [])];
-  const line: Line = [{ text: lead, color: THEME.muted }, ...pathSpans(fitPath(path, total - lead.length - width(tail) - 1), { bold: true }), ...tail];
-  return pad(withBg(line, THEME.headerBg), total, THEME.headerBg);
+  return [
+    ...(caption.trim() ? prose(caption, measure, undefined, " ").map(band) : []),
+    band([{ text: lead, color: THEME.muted }, ...pathSpans(fitPath(path, total - lead.length - width(tail) - 1)), ...tail]),
+  ];
 }
 
 /** Expanded files show this many rows, then point at the PR for the rest. */
@@ -270,8 +279,9 @@ function capRows(segments: ReadonlyArray<ReadonlyArray<DiffRow>>, limit: number)
   return { kept, hidden: Math.max(-room, 0) + segments.slice(kept.length).flat().length };
 }
 
+// Section labels sit a level below the stop title.
 const heading = (text: string, detail = ""): Line => [
-  { text, color: THEME.strong, bold: true },
+  { text, color: THEME.muted, bold: true },
   ...(detail ? [{ text: `  ${detail}`, color: THEME.muted }] : []),
 ];
 
@@ -321,10 +331,20 @@ export function stopLines({ stop, isLast, nextTitle, files, showFileDiffs }: Sto
   stop.excerpts.forEach((excerpt, excerptIndex) => {
     const file = files.get(excerpt.path);
     out.push(BLANK);
-    if (excerpt.caption.trim()) out.push(...prose(excerpt.caption, measure));
     const segments = file ? excerptRows(file, excerpt) : [];
-    const header = out.length;
-    out.push(blockHeader(excerpt.path, `L${excerpt.start}–${excerpt.end}${excerpt.side === "old" ? " · removed" : ""}`, file ? countRows(segments.flat()) : null, total));
+    out.push(
+      ...blockHeader(
+        {
+          path: excerpt.path,
+          detail: `L${excerpt.start}–${excerpt.end}${excerpt.side === "old" ? " · removed" : ""}`,
+          counts: file ? countRows(segments.flat()) : null,
+          caption: excerpt.caption,
+        },
+        total,
+        measure,
+      ),
+    );
+    const header = out.length - 1;
     if (file === undefined) {
       out.push(pad([{ text: "  This file is not in the diff.", color: THEME.muted }], total, THEME.codeBg));
       return;
@@ -358,10 +378,11 @@ export function stopLines({ stop, isLast, nextTitle, files, showFileDiffs }: Sto
     for (const other of others) {
       const file = files.get(other.path);
       const header = out.length;
+      const counts = file ? [{ text: "  " }, ...stats(file)] : [];
       out.push(
-        showFileDiffs
-          ? blockHeader(other.path, "", file ?? null, total, "▾ ")
-          : [{ text: "▸ ", color: THEME.muted }, ...pathSpans(other.path), ...(file ? [{ text: "  " }, ...stats(file)] : [])],
+        ...(showFileDiffs
+          ? blockHeader({ path: other.path, counts: file ?? null, lead: "▾ " }, total, measure)
+          : [[{ text: "▸ ", color: THEME.muted }, ...pathSpans(fitPath(other.path, total - 2 - width(counts))), ...counts]]),
       );
       if (other.note.trim() !== "") out.push(...prose(other.note, measure, { color: THEME.muted }, "  "));
       if (showFileDiffs) {
@@ -425,7 +446,7 @@ export function railLines({ stops, position, seen }: RailView, railWidth: number
     const bullet: Span = read
       ? { text: " ✔ ", color: THEME.success }
       : { text: `${String(index + 1).padStart(2)} `, color: active ? THEME.strong : THEME.muted };
-    const titleStyle: Style = { color: active ? THEME.strong : THEME.text, bold: active };
+    const titleStyle: Style = { color: active ? THEME.strong : THEME.soft, bold: active };
     const wrapped = prose(stop.title, railWidth - 5, titleStyle);
     const title = wrapped.length > 3 && !active ? [...wrapped.slice(0, 2), [...(wrapped[2] ?? []), { ...titleStyle, text: "…" }]] : wrapped;
     if (active) activeStart = out.length;
@@ -434,7 +455,7 @@ export function railLines({ stops, position, seen }: RailView, railWidth: number
       paint([
         { text: "    " },
         ...(markAttention && stop.attention !== null ? [{ text: "◆ ", color: THEME.attention }] : []),
-        { text: stopSubline(stop), color: THEME.muted },
+        { text: stopSubline(stop), color: active ? THEME.muted : THEME.faint },
       ]),
     );
     if (active) activeEnd = out.length - 1;
