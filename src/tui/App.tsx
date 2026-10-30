@@ -110,7 +110,7 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
         {pr ? (
           <>
             <Text color={THEME.faint}>{`${pr.repo} #${pr.number}  `}</Text>
-            <Text color={THEME.soft}>{pr.title}</Text>
+            <Text color={THEME.caption}>{pr.title}</Text>
           </>
         ) : (
           <Text color={THEME.muted}>pr-guide</Text>
@@ -120,7 +120,8 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
   );
 
   const bodyRows = rows - 2 - (stale ? 1 : 0);
-  const overlay = settingsOpen || helpOpen;
+  // On the tour, the key list covers only the stop, so the rail keeps the reader's place.
+  const overlay = settingsOpen || (helpOpen && screen.kind !== "tour");
 
   return (
     <Box flexDirection="column" width={columns} height={rows}>
@@ -142,10 +143,17 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
       ) : null}
       {screen.kind === "tour" ? (
         <Box display={overlay ? "none" : "flex"}>
-          <Tour key={screen.guide.generatedAt} guide={screen.guide} columns={columns} rows={bodyRows} active={!overlay} />
+          <Tour
+            key={screen.guide.generatedAt}
+            guide={screen.guide}
+            columns={columns}
+            rows={bodyRows}
+            active={!overlay && !helpOpen}
+            cover={helpOpen ? <Help /> : undefined}
+          />
         </Box>
       ) : null}
-      {helpOpen ? (
+      {helpOpen && screen.kind !== "tour" ? (
         <Help />
       ) : settingsOpen ? (
         <Settings
@@ -195,7 +203,7 @@ function Help() {
     }),
   ];
   return (
-    <Box paddingX={2} paddingY={1}>
+    <Box paddingY={1}>
       <Lines lines={card([[], ...rows, []], 60, THEME.border)} />
     </Box>
   );

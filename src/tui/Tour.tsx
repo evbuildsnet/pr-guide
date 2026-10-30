@@ -1,14 +1,14 @@
 import { Box, Text, useInput } from "ink";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import type { Guide } from "../model.ts";
 import { stopSubline } from "../tour.ts";
-import { chip, railLines, stopLines, THEME, type Line, type Span } from "./lines.ts";
+import { chip, isContinuation, railLines, stopLines, THEME, type Line, type Onward, type Span } from "./lines.ts";
 
 /** The rail hides, as t3code drops it on narrow panes, when keeping it would leave code less than this. */
 const CODE_MIN_COLUMNS = 96;
-/** Code fills the content column up to this width; wider terminals keep the column composed. */
-const CONTENT_MAX = 120;
+/** Code fills the content column up to this width; prose keeps its own 80-column measure inside it. */
+const CONTENT_MAX = 160;
 const railWidth = (columns: number) => (columns >= 180 ? 40 : columns >= 150 ? 34 : 28);
 
 export function Lines({ lines }: { lines: ReadonlyArray<Line> }) {
@@ -38,7 +38,7 @@ function scrollbar(rows: number, total: number, top: number): ReadonlyArray<Line
   const end = (more: boolean, glyph: string): Line => [{ text: more ? glyph : " ", color: THEME.faint }];
   return [
     end(top > 0, "↑"),
-    ...Array.from({ length: track }, (_, i): Line => [{ text: i >= start && i < start + size ? "┃" : " ", color: THEME.disabled }]),
+    ...Array.from({ length: track }, (_, i): Line => [{ text: i >= start && i < start + size ? "┃" : " ", color: THEME.thumb }]),
     end(top < total - rows, "↓"),
   ];
 }
@@ -48,11 +48,14 @@ export function Tour({
   columns,
   rows,
   active,
+  cover,
 }: {
   guide: Guide;
   columns: number;
   rows: number;
   active: boolean;
+  /** Shown in place of the stop, keeping the rail, e.g. the key list. */
+  cover?: ReactNode;
 }) {
   const [position, setPosition] = useState(0);
   const [seen, setSeen] = useState<ReadonlySet<number>>(new Set());
@@ -69,31 +72,35 @@ export function Tour({
   // Rail, divider and its margin, pane padding, scrollbar.
   const paneWidth = Math.min(Math.max(columns - (showRail ? rail + 2 : 0) - 3, 20), CONTENT_MAX);
 
+  const last = position === stopCount - 1;
+  // From the last stop, → goes to the first stop still unread, then finishes the tour.
+  const firstUnread = guide.stops.findIndex((_, index) => index !== position && !seen.has(index));
+  const onward: Onward = !last
+    ? { kind: "next", title: guide.stops[position + 1]?.title ?? "", label: "Next" }
+    : firstUnread !== -1
+      ? { kind: "next", title: guide.stops[firstUnread]?.title ?? "", label: "Next unread" }
+      : seen.has(position)
+        ? { kind: "done" }
+        : { kind: "finish" };
+
   const { lines, filesAt, blocks } = useMemo(
     () =>
       stop === undefined
         ? { lines: [[{ text: "This change has no files to tour.", color: THEME.muted }]], filesAt: null, blocks: [] }
         : stopLines(
-            {
-              stop,
-              isLast: position === stopCount - 1,
-              unread: guide.stops.filter((_, index) => index !== position && !seen.has(index)).length,
-              nextTitle: guide.stops[position + 1]?.title ?? null,
-              files,
-              showFileDiffs,
-            },
+            { stop, onward, files, showFileDiffs },
             // A column of air before the scrollbar.
             paneWidth - 1,
           ),
-    [stop, position, stopCount, guide, files, showFileDiffs, paneWidth, seen],
+    [stop, JSON.stringify(onward), files, showFileDiffs, paneWidth],
   );
   const maxScroll = Math.max(lines.length - paneRows, 0);
   const top = Math.min(scroll, maxScroll);
 
-  const goTo = (next: number) => {
+  const goTo = (next: number, markRead = next > position) => {
     const clamped = Math.max(Math.min(next, stopCount - 1), 0);
     if (clamped === position) return;
-    if (clamped > position) setSeen((current) => new Set(current).add(position));
+    if (markRead) setSeen((current) => new Set(current).add(position));
     setPosition(clamped);
     setScroll(0);
     setShowFileDiffs(false);
@@ -103,9 +110,9 @@ export function Tour({
   useInput(
     (input, key) => {
       if (input === "j" || input === "n" || key.rightArrow || key.return) {
-        // On the last stop, moving on finishes the tour.
-        if (position === stopCount - 1) setSeen((current) => new Set(current).add(position));
-        else goTo(position + 1);
+        if (!last) goTo(position + 1);
+        else if (firstUnread !== -1) goTo(firstUnread, true);
+        else setSeen((current) => new Set(current).add(position));
       } else if (input === "k" || input === "p" || key.leftArrow) goTo(position - 1);
       else if (key.downArrow) scrollBy(1);
       else if (key.upArrow) scrollBy(-1);
@@ -122,15 +129,13 @@ export function Tour({
     { isActive: active },
   );
 
-  const railView = useMemo(() => railLines({ stops: guide.stops, position, seen }, rail - 1), [guide, position, seen, rail]);
+  const railView = useMemo(() => railLines({ stops: guide.stops, position, seen }, rail - 1, rows), [guide, position, seen, rail, rows]);
   // Keeps the active stop in view on short terminals.
   const railTop = Math.max(Math.min(railView.activeStart, railView.activeEnd + 2 - (rows - 1)), 0);
 
   const first = position === 0;
-  const last = position === stopCount - 1;
   const key = (glyph: string, enabled: boolean): Span => (enabled ? chip(glyph) : { ...chip(glyph), color: THEME.disabled, bg: THEME.headerBg, bold: false });
-  // On the last stop → finishes the tour, so it stays live until that stop is read.
-  const keys: Line = [key("←", !first), { text: " " }, key("→", !last || !seen.has(position)), { text: "  " }, chip("?")];
+  const keys: Line = [key("←", !first), { text: " " }, key("→", onward.kind !== "done"), { text: "  " }, chip("?")];
   // Keys line up with the prose's right edge. Without the rail, the stop title fills the gap once it scrolls away.
   const keysAt = paneWidth - 1;
   const counter: Line =
@@ -140,9 +145,12 @@ export function Tour({
           { text: "Stop ", color: THEME.muted },
           { text: String(position + 1), color: THEME.strong, bold: true },
           // Once the heading scrolls away without a rail, the title says more than the file count.
-          ...(showRail || top === 0
-            ? [{ text: ` of ${stopCount}  ·  ${stopSubline(stop)}`, color: THEME.muted }]
-            : [{ text: ` of ${stopCount}  ·  `, color: THEME.muted }, { text: stop.title, color: THEME.text }]),
+          // With the rail, the file count is already under the active stop.
+          ...(showRail
+            ? [{ text: ` of ${stopCount}`, color: THEME.muted }]
+            : top === 0
+              ? [{ text: ` of ${stopCount}  ·  ${stopSubline(stop)}`, color: THEME.muted }]
+              : [{ text: ` of ${stopCount}  ·  `, color: THEME.muted }, { text: stop.title, color: THEME.text }]),
         ];
   const counterRoom = keysAt - 13 - 2;
   const fitted = counter.reduce<{ spans: Array<Span>; used: number }>(
@@ -156,10 +164,18 @@ export function Tour({
   );
   const pinned: Line = [...fitted.spans, { text: " ".repeat(Math.max(keysAt - 13 - fitted.used, 2)) }, ...keys];
 
-  // A code block scrolled partly out of view keeps its file header on the first row.
-  // It needs at least one of the block's rows still under it, or it would label nothing.
-  const block = blocks.find(({ header, end }) => header < top && top + 1 < end);
-  const visible = block ? [lines[block.header] ?? [], ...lines.slice(top + 1, top + paneRows)] : lines.slice(top, top + paneRows);
+  // A code block scrolled partly out of view pins its caption's first row and its path. It needs at
+  // least one of its rows still under them, or they would label nothing.
+  const pinnedRows = (block: (typeof blocks)[number]): Array<Line> => [
+    ...(block.caption !== null && block.caption < block.header ? [lines[block.caption] ?? []] : []),
+    block.pinned ?? lines[block.header] ?? [],
+  ];
+  const block = blocks.find((candidate) => candidate.header < top && top + pinnedRows(candidate).length < candidate.end);
+  const pins = block ? pinnedRows(block) : [];
+  // A wrapped row's continuation never opens the view: its numbered first row comes along.
+  let from = top + pins.length;
+  while (from > 0 && isContinuation(lines[from] ?? [])) from--;
+  const visible = [...pins, ...lines.slice(from, from + paneRows - pins.length)];
 
   return (
     <Box flexDirection="row" height={rows}>
@@ -180,7 +196,7 @@ export function Tour({
         <Box height={1} />
         <Box flexDirection="row" height={paneRows}>
           <Box flexDirection="column" width={paneWidth} overflow="hidden">
-            <Lines lines={visible} />
+            {cover ?? <Lines lines={visible} />}
           </Box>
           <Box width={1} flexDirection="column" overflow="hidden">
             <Lines lines={scrollbar(paneRows, lines.length, top)} />
