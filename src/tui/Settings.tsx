@@ -91,13 +91,13 @@ export function Settings({
           const active = index === selected;
           const label = row.options.find((option) => option.id === row.current)?.label ?? row.current;
           const fixed = row.options.length < 2;
-          // Like the rail, only the selected row shows its controls.
-          const arrow = active && !fixed ? THEME.accent : THEME.background;
+          // Every changeable value shows its arrows; the selected row lights them.
+          const arrow = fixed ? THEME.background : active ? THEME.accent : THEME.rule;
           const line: Line = [
             { text: active ? "▌" : " ", color: THEME.accent },
-            { text: ` ${row.label.padEnd(12)}`, color: active ? THEME.strong : THEME.text, bold: active },
+            { text: ` ${row.label.padEnd(12)}`, color: active ? THEME.strong : THEME.faint, bold: active },
             { text: fixed ? "  " : "‹ ", color: arrow },
-            { text: label, color: fixed ? THEME.muted : THEME.strong, bold: active },
+            { text: label, color: fixed ? THEME.muted : active ? THEME.strong : THEME.text, bold: active },
             { text: fixed ? "" : " ›", color: arrow },
           ];
           const width = line.reduce((sum, span) => sum + span.text.length, 0);

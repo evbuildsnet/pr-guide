@@ -220,7 +220,7 @@ function Help({ onward = "Next stop" }: { onward?: string }) {
   ];
   return (
     <Box paddingY={1}>
-      <Lines lines={card([...rows, []], 60, THEME.border)} />
+      <Lines lines={card(rows, 60, THEME.rule)} />
     </Box>
   );
 }

@@ -3,7 +3,8 @@ import { useMemo, useState, type ReactNode } from "react";
 
 import type { Guide } from "../model.ts";
 import { stopSubline } from "../tour.ts";
-import { chip, isContinuation, railLines, stopLines, THEME, type Line, type Onward, type Span } from "./lines.ts";
+import { chip, railLines, stopLines, THEME, type Line, type Onward, type Span } from "./lines.ts";
+import { layout, pageDown, settle } from "./viewport.ts";
 
 /** The rail hides, as t3code drops it on narrow panes, when keeping it would leave code less than this. */
 const CODE_MIN_COLUMNS = 96;
@@ -19,7 +20,7 @@ export function Lines({ lines }: { lines: ReadonlyArray<Line> }) {
           {line.length === 0
             ? " "
             : line.map((span, spanIndex) => (
-                <Text key={spanIndex} color={span.color} backgroundColor={span.bg} bold={span.bold} italic={span.italic}>
+                <Text key={spanIndex} color={span.color} backgroundColor={span.bg} bold={span.bold} italic={span.italic} underline={span.underline}>
                   {span.text}
                 </Text>
               ))}
@@ -105,39 +106,8 @@ export function Tour({
     setScroll(0);
     setShowFileDiffs(false);
   };
-  // Once a code block's band starts scrolling away, its caption's first row and its path stay pinned
-  // over the rows beneath them. It needs some of its rows still under them, or they'd label nothing.
-  const pinnedRows = (block: (typeof blocks)[number]): Array<Line> => [
-    ...(block.caption !== null ? [lines[block.caption] ?? []] : []),
-    block.pinned ?? lines[block.header] ?? [],
-  ];
-  const pinsAt = (at: number) => {
-    const block = blocks.find((candidate) => (candidate.caption ?? candidate.header) < at && at + pinnedRows(candidate).length < candidate.end);
-    return block ? pinnedRows(block) : [];
-  };
-  const layout = (at: number) => {
-    const pins = pinsAt(at);
-    let from = at + pins.length;
-    // A wrapped row's continuation never opens the view: back up to its numbered row. At the very bottom,
-    // step past it instead, so Next stays in view.
-    if (at < maxScroll) while (from > 0 && isContinuation(lines[from] ?? [])) from--;
-    else while (from < lines.length - 1 && isContinuation(lines[from] ?? [])) from++;
-    return { pins, from, shown: lines.slice(from, from + paneRows - pins.length) };
-  };
-
-  const scrollTo = (at: number) => {
-    const next = Math.max(Math.min(at, maxScroll), 0);
-    // Moving down, land on the true bottom rather than leave a sliver of blank, rule and Next below.
-    setScroll(next > top && maxScroll - next <= 3 ? maxScroll : next);
-  };
-  const scrollBy = (delta: number) => scrollTo(top + delta);
-  // A page down starts with the last row this page showed, whatever ends up pinned above it.
-  const pageDown = () => {
-    const { from, shown } = layout(top);
-    const last = from + shown.length - 1;
-    scrollTo([2, 1, 0].map((back) => last - back).find((at) => at > top && at + pinsAt(at).length >= last) ?? last);
-  };
-
+  const pane = { lines, blocks, rows: paneRows };
+  const scrollBy = (delta: number) => setScroll(settle(pane, top, top + delta));
   useInput(
     (input, key) => {
       if (input === "j" || input === "n" || key.rightArrow || key.return) {
@@ -147,7 +117,7 @@ export function Tour({
       } else if (input === "k" || input === "p" || key.leftArrow) goTo(position - 1);
       else if (key.downArrow) scrollBy(1);
       else if (key.upArrow) scrollBy(-1);
-      else if (input === " " || key.pageDown) pageDown();
+      else if (input === " " || key.pageDown) setScroll(pageDown(pane, top));
       else if (input === "b" || key.pageUp) scrollBy(-(paneRows - 2));
       else if (input === "g" || key.home) setScroll(0);
       else if (input === "G" || key.end) setScroll(maxScroll);
@@ -204,7 +174,7 @@ export function Tour({
   );
   const pinned: Line = [...fitted.spans, { text: " ".repeat(Math.max(keysAt - 13 - fitted.used, 2)) }, ...keys];
 
-  const { pins, from, shown } = layout(top);
+  const { pins, from, shown } = layout(pane, top);
   // The rule above Next never ends the view on its own.
   const ruleLast = from + shown.length - 1 === ruleAt;
   const visible = [...pins, ...(ruleLast ? [...shown.slice(0, -1), []] : shown)];
@@ -228,7 +198,7 @@ export function Tour({
         <Box height={1} />
         <Box flexDirection="row" height={paneRows}>
           <Box flexDirection="column" width={paneWidth} overflow="hidden">
-            {cover ? cover(onward.kind === "next" ? (onward.label === "Next" ? "Next stop" : "Next unread stop") : onward.kind === "finish" ? "Finish the tour" : "Next stop") : <Lines lines={visible} />}
+            {cover ? cover(onward.kind === "next" ? (onward.label === "Next" ? "Next stop" : "Next unread stop") : onward.kind === "finish" ? "Finish the tour" : "Nothing next: the tour is done") : <Lines lines={visible} />}
           </Box>
           <Box width={1} flexDirection="column" overflow="hidden">
             <Lines lines={covered ? [] : scrollbar(paneRows, lines.length, top)} />

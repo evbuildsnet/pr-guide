@@ -10,6 +10,9 @@ export interface Span {
   readonly bg?: string;
   readonly bold?: boolean;
   readonly italic?: boolean;
+  readonly underline?: boolean;
+  /** Marks a row that continues the one above it, so scrolling never opens a view on it. */
+  readonly cont?: boolean;
 }
 export type Line = ReadonlyArray<Span>;
 type Style = Omit<Span, "text">;
@@ -55,7 +58,7 @@ export const MEASURE = 80;
 const BLANK: Line = [];
 /** Drawn in the gutter of a wrapped code row's continuation. */
 export const CONTINUATION = " ↪";
-export const isContinuation = (line: Line) => line.some((span) => span.text === CONTINUATION);
+export const isContinuation = (line: Line) => line.some((span) => span.cont === true);
 const width = (line: Line) => line.reduce((sum, span) => sum + span.text.length, 0);
 const pad = (line: Line, to: number, bg?: string): Line => [...line, { text: " ".repeat(Math.max(to - width(line), 0)), bg }];
 const withBg = (line: Line, bg: string): Line => line.map((span) => ({ ...span, bg: span.bg ?? bg }));
@@ -225,7 +228,7 @@ function codeLines({ path, segments, side, gutter, notesAt }: CodeBlock, total: 
                 { text: " ".repeat(gutter + 1 - number.length - sign.length) },
                 { text: sign, color: tone?.sign },
                 { text: number, color: anchored ? THEME.accent : tone ? tone.number : THEME.faint, bold: anchored },
-                { text: first ? "  " : CONTINUATION, color: THEME.faint },
+                first ? { text: "  " } : { text: CONTINUATION, color: THEME.faint, cont: true },
                 ...piece,
               ],
               bg,
@@ -250,9 +253,12 @@ export function card(rows: ReadonlyArray<Line>, cardWidth: number, rule: string 
 function noteCard(marker: string, note: Note, indent: number, total: number, measure: number): Array<Line> {
   const cardWidth = Math.min(measure, total - indent + 2);
   const body = note.body.trim() === "" ? [] : prose(note.body, cardWidth - 3);
-  const rows = card([...markedTitle(marker, note.title, cardWidth - 3), ...body], cardWidth, THEME.accent);
-  // A row of code surface after the card, so the code visibly resumes.
-  return [...rows, []].map((line) => pad(withBg([{ text: " ".repeat(indent - 2) }, ...line], THEME.codeBg), total, THEME.codeBg));
+  // A row of air at the end, still the card's own, so the code visibly resumes. Rows after the title
+  // continue it: a view never opens on a note without its letter and title.
+  const rows = card([...markedTitle(marker, note.title, cardWidth - 3), ...body, []], cardWidth, THEME.accent);
+  return rows.map((line, i) =>
+    pad(withBg([{ text: " ".repeat(indent - 2), ...(i > 0 && { cont: true }) }, ...line], THEME.codeBg), total, THEME.codeBg),
+  );
 }
 
 /** A note's letter chip and title, the title wrapping under itself. */
@@ -429,6 +435,8 @@ export function stopLines({ stop, onward, files, showFileDiffs }: StopView, tota
     out.push([...heading(stop.excerpts.length > 0 ? "Also in this stop" : "Files in this stop"), { text: "  " }, chip(`f ${showFileDiffs ? "▾" : "▸"}`)]);
     others.forEach((other, otherIndex) => {
       const file = files.get(other.path);
+      // Expanded cards keep a row of air from the section label, as excerpt cards do from each other.
+      if (showFileDiffs && otherIndex === 0) out.push(BLANK);
       const start = out.length;
       const counts = file ? [{ text: "  " }, ...stats(file)] : [];
       out.push(
