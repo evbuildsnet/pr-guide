@@ -35,9 +35,9 @@ export const THEME = {
   codeBg: "#21252b",
   headerBg: "#2c313a",
   noteBg: "#2c313a",
-  addition: { sign: "#98c379", bg: "#233529" },
-  deletion: { sign: "#e06c75", bg: "#3b2529" },
-  syntax: { comment: "#7f848e", string: "#98c379", number: "#d19a66", keyword: "#c678dd", plain: undefined },
+  addition: { sign: "#98c379", bg: "#263229" },
+  deletion: { sign: "#e06c75", bg: "#36272b" },
+  syntax: { comment: "#a5adba", string: "#98c379", number: "#d19a66", keyword: "#c678dd", plain: undefined },
 } as const satisfies Record<string, unknown> & { syntax: Record<Token, string | undefined> };
 
 /** Prose wraps at a comfortable reading measure; code takes the full width. */
@@ -94,22 +94,41 @@ export function prose(text: string, wrapAt: number, base: Style = { color: THEME
   return lines;
 }
 
-/** Cuts styled spans into rows of at most `size` characters. */
-function chunk(spans: ReadonlyArray<Span>, size: number): Array<Array<Span>> {
-  const rows: Array<Array<Span>> = [[]];
-  let room = size;
+const sliceSpans = (spans: ReadonlyArray<Span>, start: number, end: number): Array<Span> => {
+  const out: Array<Span> = [];
+  let at = 0;
   for (const span of spans) {
-    let rest = span.text;
-    while (rest.length > 0) {
-      if (room === 0) {
-        rows.push([]);
-        room = size;
-      }
-      const take = rest.slice(0, room);
-      rows.at(-1)!.push({ ...span, text: take });
-      room -= take.length;
-      rest = rest.slice(take.length);
+    const from = Math.max(start - at, 0);
+    const to = Math.min(end - at, span.text.length);
+    if (from < to) out.push({ ...span, text: span.text.slice(from, to) });
+    at += span.text.length;
+  }
+  return out;
+};
+
+/**
+ * Wraps a code line at spaces or punctuation, so identifiers stay whole. Continuations hang
+ * two columns past the line's own indent. A word longer than the row is cut where it must be.
+ */
+function wrapCode(spans: ReadonlyArray<Span>, size: number): Array<Array<Span>> {
+  const text = spans.map((span) => span.text).join("");
+  if (text.length <= size) return [[...spans]];
+  const hang = Math.min(text.length - text.trimStart().length + 2, Math.floor(size / 2));
+  const rows: Array<Array<Span>> = [];
+  let start = 0;
+  while (start < text.length) {
+    const room = rows.length === 0 ? size : size - hang;
+    let end = Math.min(start + room, text.length);
+    if (end < text.length) {
+      const window = text.slice(start, end);
+      const space = window.lastIndexOf(" ");
+      const punctuation = Math.max(...[...",;.()[]{}/=&|:"].map((char) => window.lastIndexOf(char)));
+      const cut = space > room / 3 ? space + 1 : punctuation > room / 3 ? punctuation + 1 : room;
+      end = start + cut;
     }
+    rows.push([...(rows.length > 0 ? [{ text: " ".repeat(hang) }] : []), ...sliceSpans(spans, start, end)]);
+    start = end;
+    while (text[start] === " ") start++;
   }
   return rows;
 }
@@ -122,7 +141,12 @@ function pathSpans(path: string, style: Style = {}): Array<Span> {
   ];
 }
 
-const stats = (additions: number, deletions: number): Array<Span> => [
+const countRows = (rows: ReadonlyArray<DiffRow>) => ({
+  additions: rows.filter((row) => row.kind === "addition").length,
+  deletions: rows.filter((row) => row.kind === "deletion").length,
+});
+
+const stats = ({ additions, deletions }: { additions: number; deletions: number }): Array<Span> => [
   ...(deletions > 0 ? [{ text: `−${deletions}`, color: THEME.deletion.sign }] : []),
   ...(additions > 0 && deletions > 0 ? [{ text: " " }] : []),
   ...(additions > 0 ? [{ text: `+${additions}`, color: THEME.addition.sign }] : []),
@@ -136,41 +160,41 @@ interface CodeBlock {
   readonly notesAt?: ReadonlyMap<number, ReadonlyArray<{ marker: string; note: Note }>>;
 }
 
-/** Diff rows on a dark code surface: a colored bar and line number mark changes, notes sit under their line. */
+/**
+ * Diff rows on a dark code surface: a colored sign and line number mark changes, notes sit under their line.
+ * A block that only adds lines skips the row tint, so a new file doesn't turn into a wall of green.
+ */
 function codeLines({ path, segments, side, notesAt }: CodeBlock, total: number, measure: number): Array<Line> {
   const numberOf = (row: DiffRow) =>
     row.kind === "addition" ? row.newLine : row.kind === "deletion" ? row.oldLine : side === "new" ? row.newLine : row.oldLine;
   const gutter = Math.max(2, ...segments.flat().map((row) => String(numberOf(row) ?? "").length));
-  const markerWidth = notesAt && notesAt.size > 0 ? 4 : 0;
-  const lead = markerWidth + 1 + gutter + 2;
-  const room = Math.max(total - lead - 1, 8);
+  const tinted = segments.flat().some((row) => row.kind !== "addition");
+  // The marker lane is always there, so gutters line up from block to block.
+  const lane = Math.max(4, ...[...(notesAt?.values() ?? [])].map((notes) => notes.length + 3));
+  const lead = lane + 2 + gutter + 2;
+  const room = Math.max(total - lead, 8);
   const out: Array<Line> = [];
   segments.forEach((rows, index) => {
-    if (index > 0) out.push(pad([{ text: `${" ".repeat(markerWidth + 1 + gutter - 1)}⋯`, color: THEME.faint, bg: THEME.codeBg }], total, THEME.codeBg));
+    if (index > 0) out.push(pad(withBg([{ text: `${" ".repeat(lane + 2 + gutter - 1)}⋯`, color: THEME.faint }], THEME.codeBg), total, THEME.codeBg));
     for (const row of rows) {
       const tone = row.kind === "context" ? null : THEME[row.kind];
-      const bg = tone?.bg ?? THEME.codeBg;
+      const bg = tone && tinted ? tone.bg : THEME.codeBg;
       const anchor = side === "new" ? row.newLine : row.oldLine;
       const notes = anchor === null ? undefined : notesAt?.get(anchor);
-      const code = tokenize(row.text.replaceAll("\t", "    "), path).map(({ text, token }) => ({ text, color: THEME.syntax[token] ?? THEME.text, italic: token === "comment" }));
-      chunk(code, room).forEach((piece, pieceIndex) => {
+      const code = tokenize(row.text.replaceAll("\t", "    "), path).map(({ text, token }) => ({ text, color: THEME.syntax[token] ?? THEME.text }));
+      wrapCode(code, room).forEach((piece, pieceIndex) => {
         const first = pieceIndex === 0;
-        const marker = first && notes ? ` ${notes.map((n) => n.marker).join("")} `.padEnd(markerWidth - 1) : "";
+        const markers = first && notes ? notes.map((n) => n.marker).join("") : "";
         out.push(
           pad(
             withBg(
               [
-                ...(markerWidth > 0
-                  ? marker
-                    ? [{ text: marker, color: "#1d1f21", bg: THEME.attention, bold: true }, { text: " " }]
-                    : [{ text: " ".repeat(markerWidth) }]
-                  : []),
-                { text: tone ? "▎" : " ", color: tone?.sign },
-                {
-                  text: first ? String(numberOf(row) ?? "").padStart(gutter) : "↪".padStart(gutter),
-                  color: tone && first ? tone.sign : THEME.faint,
-                },
-                { text: "  " },
+                ...(markers
+                  ? [{ text: ` ${markers} `, color: "#1d1f21", bg: THEME.attention, bold: true }, { text: " ".repeat(lane - markers.length - 2) }]
+                  : [{ text: " ".repeat(lane) }]),
+                { text: first && tone ? (row.kind === "addition" ? "+ " : "− ") : "  ", color: tone?.sign },
+                { text: first ? String(numberOf(row) ?? "").padStart(gutter) : " ".repeat(gutter), color: tone ? tone.sign : THEME.faint },
+                { text: first ? "  " : " ↪", color: THEME.faint },
                 ...piece,
               ],
               bg,
@@ -186,35 +210,32 @@ function codeLines({ path, segments, side, notesAt }: CodeBlock, total: number, 
   return out;
 }
 
+/** A filled card with an amber rule: the shape of everything that asks for the reader's judgment. */
+function card(rows: ReadonlyArray<Line>, cardWidth: number, padded = true): Array<Line> {
+  const fill = (line: Line): Line => pad(withBg([{ text: "┃ ", color: THEME.attention }, ...line], THEME.noteBg), cardWidth, THEME.noteBg);
+  return [...(padded ? [fill([])] : []), ...rows.map(fill), ...(padded ? [fill([])] : [])];
+}
+
 /** A note drawn under the line it is about, like an inline review comment. */
 function noteCard(marker: string, note: Note, indent: number, total: number, measure: number): Array<Line> {
-  const bar: Span = { text: "┃ ", color: THEME.attention };
-  const lead: Span = { text: " ".repeat(Math.max(indent - 2, 0)) };
-  const body = note.body.trim() === "" ? [] : prose(note.body, Math.min(measure, total - indent - 1));
-  const rows: Array<Line> = [
-    [lead, bar, { text: ` ${marker} `, color: "#1d1f21", bg: THEME.attention, bold: true }, { text: ` ${note.title}`, color: THEME.strong, bold: true }],
-    ...body.map((line) => [lead, bar, ...line]),
-  ];
-  return [BLANK, ...rows, BLANK].map((line) => pad(withBg(line, THEME.noteBg), total, THEME.noteBg));
+  const cardWidth = Math.min(measure, total - indent + 2);
+  const body = note.body.trim() === "" ? [] : prose(note.body, cardWidth - 3);
+  const rows = card(
+    [[{ text: ` ${marker} `, color: "#1d1f21", bg: THEME.attention, bold: true }, { text: ` ${note.title}`, color: THEME.strong, bold: true }], ...body],
+    cardWidth,
+    false,
+  );
+  return rows.map((line) => pad(withBg([{ text: " ".repeat(indent - 2) }, ...line], THEME.codeBg), total, THEME.codeBg));
 }
 
-function blockHeader(path: string, detail: string, file: DiffFile | undefined, total: number): Line {
-  const left: Line = [{ text: " " }, ...pathSpans(path, { bold: true }), ...(detail ? [{ text: `  ${detail}`, color: THEME.muted }] : [])];
-  const right: Line = file ? [...stats(file.additions, file.deletions), { text: " " }] : [];
-  return withBg([...left, { text: " ".repeat(Math.max(total - width(left) - width(right), 1)) }, ...right], THEME.headerBg);
-}
-
-/** A bordered card at reading width, like t3code's callouts. */
-function card(title: Line, body: ReadonlyArray<Line>, cardWidth: number): Array<Line> {
-  const edge = { color: THEME.border };
-  const inner = cardWidth - 4;
-  const row = (line: Line): Line => [{ ...edge, text: "│ " }, ...pad(line, inner), { ...edge, text: " │" }];
-  return [
-    [{ ...edge, text: `╭${"─".repeat(cardWidth - 2)}╮` }],
-    row(title),
-    ...body.map(row),
-    [{ ...edge, text: `╰${"─".repeat(cardWidth - 2)}╯` }],
+function blockHeader(path: string, detail: string, counts: { additions: number; deletions: number } | null, total: number): Line {
+  const line: Line = [
+    { text: " " },
+    ...pathSpans(path, { bold: true }),
+    ...(detail ? [{ text: `  ${detail}`, color: THEME.muted }] : []),
+    ...(counts ? [{ text: "  " }, ...stats(counts)] : []),
   ];
+  return pad(withBg(line, THEME.headerBg), total, THEME.headerBg);
 }
 
 const heading = (text: string, detail = ""): Line => [
@@ -232,6 +253,8 @@ export interface StopView {
 
 /** Draws one stop the way t3code's GuideStop lays it out, top to bottom. `filesAt` is the row of the file list. */
 export function stopLines({ stop, isLast, nextTitle, files, showFileDiffs }: StopView, total: number) {
+  // Code blocks by line range, so a block scrolled partly away can pin its header.
+  const blocks: Array<{ header: number; end: number }> = [];
   const measure = Math.min(total, MEASURE);
   const { lettered, byExcerpt } = letterStopNotes(stop);
   const out: Array<Line> = [...prose(stop.title, measure, { color: THEME.strong, bold: true })];
@@ -241,8 +264,7 @@ export function stopLines({ stop, isLast, nextTitle, files, showFileDiffs }: Sto
     out.push(
       BLANK,
       ...card(
-        [{ text: "◆ ", color: THEME.attention }, { text: ATTENTION_LABELS[stop.attention.kind], color: THEME.strong, bold: true }],
-        prose(stop.attention.note, measure - 4),
+        [[{ text: ATTENTION_LABELS[stop.attention.kind], color: THEME.attention, bold: true }], ...prose(stop.attention.note, measure - 4)],
         measure,
       ),
     );
@@ -253,7 +275,9 @@ export function stopLines({ stop, isLast, nextTitle, files, showFileDiffs }: Sto
     const file = files.get(excerpt.path);
     out.push(BLANK);
     if (excerpt.caption.trim()) out.push(...prose(excerpt.caption, measure, { color: THEME.muted }));
-    out.push(blockHeader(excerpt.path, `L${excerpt.start}–${excerpt.end}${excerpt.side === "old" ? " · removed" : ""}`, file, total));
+    const segments = file ? excerptRows(file, excerpt) : [];
+    const header = out.length;
+    out.push(blockHeader(excerpt.path, `L${excerpt.start}–${excerpt.end}${excerpt.side === "old" ? " · removed" : ""}`, file ? countRows(segments.flat()) : null, total));
     if (file === undefined) {
       out.push(pad([{ text: "  This file is not in the diff.", color: THEME.muted }], total, THEME.codeBg));
       return;
@@ -265,7 +289,8 @@ export function stopLines({ stop, isLast, nextTitle, files, showFileDiffs }: Sto
         return [line, lettered.filter(({ marker }) => letters.includes(marker))] as const;
       }),
     );
-    out.push(...codeLines({ path: excerpt.path, segments: excerptRows(file, excerpt), side: excerpt.side, notesAt }, total, measure));
+    out.push(...codeLines({ path: excerpt.path, segments, side: excerpt.side, notesAt }, total, measure));
+    blocks.push({ header, end: out.length });
   });
 
   // Notes on lines no excerpt shows.
@@ -287,19 +312,15 @@ export function stopLines({ stop, isLast, nextTitle, files, showFileDiffs }: Sto
   if (others.length > 0) {
     out.push(BLANK);
     filesAt = out.length;
-    out.push([
-      ...heading(stop.excerpts.length > 0 ? "Also in this stop" : "Files in this stop"),
-      { text: "   " },
-      chip("f"),
-      { text: showFileDiffs ? " hide diffs" : " show diffs", color: THEME.muted },
-    ]);
+    out.push([...heading(stop.excerpts.length > 0 ? "Also in this stop" : "Files in this stop"), { text: "  " }, chip("f")]);
     for (const other of others) {
       const file = files.get(other.path);
-      out.push([
-        { text: showFileDiffs ? "▾ " : "▸ ", color: THEME.muted },
-        ...pathSpans(other.path),
-        ...(file ? [{ text: "  " }, ...stats(file.additions, file.deletions)] : []),
-      ]);
+      const header = out.length;
+      out.push(
+        showFileDiffs
+          ? blockHeader(other.path, "", file ?? null, total)
+          : [{ text: "▸ ", color: THEME.muted }, ...pathSpans(other.path), ...(file ? [{ text: "  " }, ...stats(file)] : [])],
+      );
       if (other.note.trim() !== "") out.push(...prose(other.note, measure, { color: THEME.muted }, "  "));
       if (showFileDiffs) {
         out.push(
@@ -308,8 +329,9 @@ export function stopLines({ stop, isLast, nextTitle, files, showFileDiffs }: Sto
             : file.hunks.length === 0
               ? [[{ text: "  No text changes (binary, rename or mode change).", color: THEME.muted }]]
               : codeLines({ path: file.path, segments: file.hunks.map((hunk) => hunk.rows), side: "new" }, total, measure)),
-          BLANK,
         );
+        blocks.push({ header, end: out.length });
+        out.push(BLANK);
       }
     }
   }
@@ -326,10 +348,10 @@ export function stopLines({ stop, isLast, nextTitle, files, showFileDiffs }: Sto
     nextTitle !== null
       ? [chip("→"), { text: "  Next  ", color: THEME.muted }, { text: nextTitle, color: THEME.strong, bold: true }]
       : isLast
-        ? [chip("o"), { text: "  That's the tour. ", color: THEME.strong, bold: true }, { text: "Open the PR to leave your review.", color: THEME.muted }]
+        ? [{ text: "That's the tour.  ", color: THEME.strong, bold: true }, chip("o"), { text: "  Open the PR", color: THEME.text }]
         : [],
   );
-  return { lines: out, filesAt };
+  return { lines: out, filesAt, blocks };
 }
 
 export interface RailView {
@@ -340,9 +362,11 @@ export interface RailView {
 
 /** The numbered stop list with read checkmarks, as in t3code's GuideRail. Returns where the active stop sits. */
 export function railLines({ stops, position, seen }: RailView, railWidth: number) {
+  // A mark every stop carries tells the reader nothing.
+  const markAttention = stops.some((stop) => stop.attention === null);
   const done = seen.size === stops.length;
   const out: Array<Line> = [
-    [done ? { text: `✓ All ${stops.length} read`, color: THEME.success } : { text: `${seen.size} of ${stops.length} read`, color: THEME.muted }],
+    [done ? { text: `✔ All ${stops.length} read`, color: THEME.success } : { text: `${seen.size} of ${stops.length} read`, color: THEME.muted }],
     BLANK,
   ];
   let activeStart = 0;
@@ -355,17 +379,17 @@ export function railLines({ stops, position, seen }: RailView, railWidth: number
       return active ? pad(withBg(row, THEME.selection), railWidth, THEME.selection) : row;
     };
     const bullet: Span = read
-      ? { text: " ✓ ", color: THEME.success }
+      ? { text: " ✔ ", color: THEME.success }
       : { text: `${String(index + 1).padStart(2)} `, color: active ? THEME.strong : THEME.muted };
     const titleStyle: Style = { color: active ? THEME.strong : read ? THEME.muted : THEME.text, bold: active };
     const wrapped = prose(stop.title, railWidth - 5, titleStyle);
-    const title = wrapped.length > 3 ? [...wrapped.slice(0, 2), [...(wrapped[2] ?? []), { ...titleStyle, text: "…" }]] : wrapped;
+    const title = wrapped.length > 3 && !active ? [...wrapped.slice(0, 2), [...(wrapped[2] ?? []), { ...titleStyle, text: "…" }]] : wrapped;
     if (active) activeStart = out.length;
     title.forEach((line, i) => out.push(paint([i === 0 ? bullet : { text: "   " }, { text: " " }, ...line])));
     out.push(
       paint([
         { text: "    " },
-        ...(stop.attention !== null ? [{ text: "◆ ", color: THEME.attention }] : []),
+        ...(markAttention && stop.attention !== null ? [{ text: "◆ ", color: THEME.attention }] : []),
         { text: stopSubline(stop), color: THEME.muted },
       ]),
     );

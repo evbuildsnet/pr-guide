@@ -3,10 +3,12 @@ import { useMemo, useState } from "react";
 
 import type { Guide } from "../model.ts";
 import { stopSubline } from "../tour.ts";
-import { chip, railLines, stopLines, THEME, type Line } from "./lines.ts";
+import { chip, MEASURE, railLines, stopLines, THEME, type Line, type Span } from "./lines.ts";
 
-/** Below this the rail hides, as t3code drops it on narrow panes. */
-const RAIL_MIN_COLUMNS = 110;
+/** Below this the rail hides, as t3code drops it on narrow panes, so the reading pane keeps ~90 columns. */
+const RAIL_MIN_COLUMNS = 120;
+/** Code fills the content column up to this width; wider terminals keep the column composed. */
+const CONTENT_MAX = 120;
 const railWidth = (columns: number) => (columns >= 150 ? 34 : 28);
 
 export function Lines({ lines }: { lines: ReadonlyArray<Line> }) {
@@ -59,12 +61,12 @@ export function Tour({
   // The stop counter stays pinned above the scrolling pane.
   const paneRows = Math.max(rows - 2, 1);
   // Rail, divider and its margin, pane padding, scrollbar.
-  const paneWidth = Math.max(columns - (showRail ? rail + 2 : 0) - 3, 20);
+  const paneWidth = Math.min(Math.max(columns - (showRail ? rail + 2 : 0) - 3, 20), CONTENT_MAX);
 
-  const { lines, filesAt } = useMemo(
+  const { lines, filesAt, blocks } = useMemo(
     () =>
       stop === undefined
-        ? { lines: [[{ text: "This change has no files to tour.", color: THEME.muted }]], filesAt: null }
+        ? { lines: [[{ text: "This change has no files to tour.", color: THEME.muted }]], filesAt: null, blocks: [] }
         : stopLines(
             { stop, isLast: position === stopCount - 1, nextTitle: guide.stops[position + 1]?.title ?? null, files, showFileDiffs },
             paneWidth,
@@ -98,9 +100,9 @@ export function Tour({
       else if (input === "g" || key.home) setScroll(0);
       else if (input === "G" || key.end) setScroll(maxScroll);
       else if (input === "f" && filesAt !== null) {
-        // Bring the file list into view so the toggle visibly does something.
-        setShowFileDiffs((current) => !current);
-        setScroll(filesAt);
+        // Expanding brings the file list into view so the toggle visibly does something.
+        if (!showFileDiffs) setScroll(filesAt);
+        setShowFileDiffs(!showFileDiffs);
       } else if (/^[1-9]$/.test(input)) goTo(Number(input) - 1);
     },
     { isActive: active },
@@ -110,15 +112,36 @@ export function Tour({
   // Keeps the active stop in view on short terminals.
   const railTop = Math.max(Math.min(railView.activeStart, railView.activeEnd + 2 - (rows - 1)), 0);
 
+  const first = position === 0;
+  const last = position === stopCount - 1;
+  const key = (glyph: string, enabled: boolean): Span => (enabled ? chip(glyph) : { ...chip(glyph), color: THEME.faint, bg: THEME.headerBg, bold: false });
+  const keys: Line = [key("←", !first), { text: " " }, key("→", !last), { text: "  " }, chip("?")];
+  // Keys line up with the prose's right edge; without the rail, the stop title fills the gap.
+  const keysAt = Math.min(MEASURE, paneWidth);
   const counter: Line =
     stop === undefined
       ? []
       : [
-          { text: `Stop ${position + 1} of ${stopCount}`, color: THEME.muted },
-          { text: `  ·  ${stopSubline(stop)}`, color: THEME.muted },
+          { text: "Stop ", color: THEME.muted },
+          { text: String(position + 1), color: THEME.strong, bold: true },
+          { text: ` of ${stopCount}  ·  ${stopSubline(stop)}`, color: THEME.muted },
+          ...(showRail ? [] : [{ text: `  ·  ${stop.title}`, color: THEME.text }]),
         ];
-  const keys: Line = [chip("←"), { text: " " }, chip("→"), { text: "   " }, chip("?")];
-  const counterWidth = counter.reduce((sum, span) => sum + span.text.length, 0);
+  const counterRoom = keysAt - 13 - 2;
+  const fitted = counter.reduce<{ spans: Array<Span>; used: number }>(
+    ({ spans, used }, span) => {
+      const room = counterRoom - used;
+      if (room <= 0) return { spans, used };
+      const text = span.text.length > room ? `${span.text.slice(0, room - 1)}…` : span.text;
+      return { spans: [...spans, { ...span, text }], used: used + text.length };
+    },
+    { spans: [], used: 0 },
+  );
+  const pinned: Line = [...fitted.spans, { text: " ".repeat(Math.max(keysAt - 13 - fitted.used, 2)) }, ...keys];
+
+  // A code block scrolled partly out of view keeps its file header on the first row.
+  const block = blocks.find(({ header, end }) => header < top && top < end);
+  const visible = block ? [lines[block.header] ?? [], ...lines.slice(top + 1, top + paneRows)] : lines.slice(top, top + paneRows);
 
   return (
     <Box flexDirection="row" height={rows}>
@@ -134,12 +157,12 @@ export function Tour({
       ) : null}
       <Box flexDirection="column" paddingLeft={1}>
         <Box width={paneWidth + 1} overflow="hidden">
-          <Lines lines={[[...counter, { text: " ".repeat(Math.max(paneWidth - counterWidth - 13, 1)) }, ...keys]]} />
+          <Lines lines={[pinned]} />
         </Box>
         <Box height={1} />
         <Box flexDirection="row" height={paneRows}>
           <Box flexDirection="column" width={paneWidth} overflow="hidden">
-            <Lines lines={lines.slice(top, top + paneRows)} />
+            <Lines lines={visible} />
           </Box>
           <Box width={1} flexDirection="column" overflow="hidden">
             <Text color={THEME.faint}>{scrollbar(paneRows, lines.length, top)}</Text>

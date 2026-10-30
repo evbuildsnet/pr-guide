@@ -3,7 +3,7 @@ import { useState } from "react";
 
 import { describeChoice, EFFORTS, EFFORT_LABELS, PROVIDERS, PROVIDER_IDS, TIER_LABELS, tiersFor, type ModelChoice } from "../catalog.ts";
 import { activeChoice, sanitizeChoice, saveSettings, type Settings as SettingsData } from "../settings.ts";
-import { chip, THEME, type Line } from "./lines.ts";
+import { THEME, type Line } from "./lines.ts";
 import { Lines } from "./Tour.tsx";
 
 interface Row {
@@ -106,7 +106,6 @@ export function Settings({
         {`Uses your ${provider} CLI and its login. Changes save automatically and apply to the next guide.`}
         {written ? `\nThis guide was written with ${describeChoice(written)}.` : ""}
       </Text>
-      <Lines lines={[[chip("enter"), { text: "  Done", color: THEME.text }]]} />
     </Box>
   );
 }

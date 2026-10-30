@@ -170,7 +170,8 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
 const action = (key: string, label: string): Line => [chip(key), { text: `  ${label}`, color: THEME.text }];
 
 const HELP: ReadonlyArray<readonly [string, string]> = [
-  ["← →  j k", "Previous / next stop"],
+  ["→  j  enter", "Next stop"],
+  ["←  k", "Previous stop"],
   ["1–9", "Jump to a stop"],
   ["↑ ↓", "Scroll"],
   ["space  b", "Page down / up"],
@@ -191,7 +192,7 @@ function Help() {
       <Box flexDirection="column">
         {HELP.map(([keys, label]) => (
           <Box key={keys}>
-            <Box width={12}>
+            <Box width={14}>
               <Text color={THEME.accent}>{keys}</Text>
             </Box>
             <Text color={THEME.text}>{label}</Text>
