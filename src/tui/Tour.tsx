@@ -3,7 +3,7 @@ import { useMemo, useState, type ReactNode } from "react";
 
 import type { Guide } from "../model.ts";
 import { stopSubline } from "../tour.ts";
-import { chip, isContinuation, railLines, stopLines, THEME, type Line, type Onward, type Span } from "./lines.ts";
+import { chip, isContinuation, MEASURE, railLines, stopLines, THEME, type Line, type Onward, type Span } from "./lines.ts";
 
 /** The rail hides, as t3code drops it on narrow panes, when keeping it would leave code less than this. */
 const CODE_MIN_COLUMNS = 96;
@@ -83,10 +83,10 @@ export function Tour({
         ? { kind: "done" }
         : { kind: "finish" };
 
-  const { lines, filesAt, blocks } = useMemo(
+  const { lines, filesAt, blocks, ruleAt, wide } = useMemo(
     () =>
       stop === undefined
-        ? { lines: [[{ text: "This change has no files to tour.", color: THEME.muted }]], filesAt: null, blocks: [] }
+        ? { lines: [[{ text: "This change has no files to tour.", color: THEME.muted }]], filesAt: null, blocks: [], ruleAt: -1, wide: false }
         : stopLines(
             { stop, onward, files, showFileDiffs },
             // A column of air before the scrollbar.
@@ -135,9 +135,17 @@ export function Tour({
 
   const first = position === 0;
   const key = (glyph: string, enabled: boolean): Span => (enabled ? chip(glyph) : { ...chip(glyph), color: THEME.disabled, bg: THEME.headerBg, bold: false });
-  const keys: Line = [key("←", !first), { text: " " }, key("→", onward.kind !== "done"), { text: "  " }, chip("?")];
-  // Keys line up with the prose's right edge. Without the rail, the stop title fills the gap once it scrolls away.
-  const keysAt = paneWidth - 1;
+  // While the key list covers the stop, ? is the live key and the arrows rest.
+  const covered = cover !== undefined;
+  const keys: Line = [
+    key("←", !first && !covered),
+    { text: " " },
+    key("→", onward.kind !== "done" && !covered),
+    { text: "  " },
+    covered ? { ...chip("?"), color: THEME.background, bg: THEME.accent } : chip("?"),
+  ];
+  // Keys sit at the content's right edge: the code edge, or the prose edge on a stop without code.
+  const keysAt = wide ? paneWidth - 1 : Math.min(MEASURE, paneWidth - 1);
   const counter: Line =
     stop === undefined
       ? []
@@ -164,18 +172,21 @@ export function Tour({
   );
   const pinned: Line = [...fitted.spans, { text: " ".repeat(Math.max(keysAt - 13 - fitted.used, 2)) }, ...keys];
 
-  // A code block scrolled partly out of view pins its caption's first row and its path. It needs at
-  // least one of its rows still under them, or they would label nothing.
+  // Once a code block's band starts scrolling away, its caption's first row and its path stay pinned
+  // over the rows beneath them. It needs some of its rows still under them, or they'd label nothing.
   const pinnedRows = (block: (typeof blocks)[number]): Array<Line> => [
-    ...(block.caption !== null && block.caption < block.header ? [lines[block.caption] ?? []] : []),
+    ...(block.caption !== null ? [lines[block.caption] ?? []] : []),
     block.pinned ?? lines[block.header] ?? [],
   ];
-  const block = blocks.find((candidate) => candidate.header < top && top + pinnedRows(candidate).length < candidate.end);
+  const block = blocks.find((candidate) => (candidate.caption ?? candidate.header) < top && top + pinnedRows(candidate).length < candidate.end);
   const pins = block ? pinnedRows(block) : [];
-  // A wrapped row's continuation never opens the view: its numbered first row comes along.
+  // A wrapped row's continuation never opens the view under the pins; the view starts at the next numbered row.
   let from = top + pins.length;
-  while (from > 0 && isContinuation(lines[from] ?? [])) from--;
-  const visible = [...pins, ...lines.slice(from, from + paneRows - pins.length)];
+  while (from < lines.length - 1 && isContinuation(lines[from] ?? [])) from++;
+  const shown = lines.slice(from, from + paneRows - pins.length);
+  // The rule above Next never ends the view on its own.
+  const ruleLast = from + shown.length - 1 === ruleAt;
+  const visible = [...pins, ...(ruleLast ? [...shown.slice(0, -1), []] : shown)];
 
   return (
     <Box flexDirection="row" height={rows}>
@@ -199,7 +210,7 @@ export function Tour({
             {cover ?? <Lines lines={visible} />}
           </Box>
           <Box width={1} flexDirection="column" overflow="hidden">
-            <Lines lines={scrollbar(paneRows, lines.length, top)} />
+            <Lines lines={covered ? [] : scrollbar(paneRows, lines.length, top)} />
           </Box>
         </Box>
       </Box>

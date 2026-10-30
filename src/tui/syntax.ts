@@ -35,17 +35,39 @@ const patternFor = (path: string) => {
 
 const cache = new Map<string, RegExp>();
 
-export function tokenize(text: string, path: string): Array<{ text: string; token: Token }> {
-  const pattern = cache.get(path) ?? patternFor(path);
-  cache.set(path, pattern);
+/** A construct left open at the end of a line: a template string or a block comment. */
+export type Open = "`" | "/*" | null;
+
+const CLOSERS = { "`": { close: /(?:[^`\\]|\\.)*`/y, token: "string" }, "/*": { close: /.*?\*\//y, token: "comment" } } as const;
+
+/** Tokenizes one line, continuing whatever the previous line left open, and says what this one leaves open. */
+export function tokenize(text: string, path: string, open: Open = null): { tokens: Array<{ text: string; token: Token }>; open: Open } {
   const out: Array<{ text: string; token: Token }> = [];
   let last = 0;
-  for (const match of text.matchAll(pattern)) {
-    if (match.index > last) out.push({ text: text.slice(last, match.index), token: "plain" });
+  if (open !== null) {
+    const { close, token } = CLOSERS[open];
+    close.lastIndex = 0;
+    const match = close.exec(text);
+    if (match === null) return { tokens: [{ text, token }], open };
+    out.push({ text: match[0], token });
+    last = match[0].length;
+  }
+  const pattern = cache.get(path) ?? patternFor(path);
+  cache.set(path, pattern);
+  let next: Open = null;
+  const offset = last;
+  for (const match of text.slice(offset).matchAll(pattern)) {
+    const index = match.index + offset;
+    if (index > last) out.push({ text: text.slice(last, index), token: "plain" });
     const token: Token = match[1] ? "comment" : match[2] ? "string" : match[3] ? "number" : "keyword";
     out.push({ text: match[0], token });
-    last = match.index + match[0].length;
+    last = index + match[0].length;
+    const unclosed = (opener: string, closer: string) => match[0].startsWith(opener) && (match[0].length < opener.length + closer.length || !match[0].endsWith(closer));
+    next = unclosed("`", "`") ? "`" : unclosed("/*", "*/") ? "/*" : null;
   }
-  if (last < text.length) out.push({ text: text.slice(last), token: "plain" });
-  return out;
+  if (last < text.length) {
+    out.push({ text: text.slice(last), token: "plain" });
+    next = null;
+  }
+  return { tokens: out, open: next };
 }

@@ -1,7 +1,7 @@
 import { excerptRows } from "../diff.ts";
 import type { DiffFile, DiffRow, Excerpt, Note, Stop } from "../model.ts";
 import { ATTENTION_LABELS, letterStopNotes, otherFiles, stopSubline } from "../tour.ts";
-import { tokenize, type Token } from "./syntax.ts";
+import { tokenize, type Open, type Token } from "./syntax.ts";
 
 /** A styled run of text. A stop is drawn as an array of lines so the pane can scroll it. */
 export interface Span {
@@ -19,6 +19,7 @@ type Style = Omit<Span, "text">;
  * text, which terminals render at half opacity: three text levels carry the hierarchy instead.
  */
 export const THEME = {
+  background: "#282c34",
   strong: "#ffffff",
   text: "#d7dae0",
   muted: "#9da5b4",
@@ -44,7 +45,7 @@ export const THEME = {
   noteBg: "#2c313a",
   // Removed lines keep their old-file number, dimmer so it reads as another coordinate, not a miscount.
   addition: { sign: "#98c379", number: "#98c379", bg: "#263229" },
-  deletion: { sign: "#e06c75", number: "#b0646e", bg: "#36272b" },
+  deletion: { sign: "#e06c75", number: "#cf8993", bg: "#36272b" },
   syntax: { comment: "#8f98a6", string: "#98c379", number: "#d19a66", keyword: "#c678dd", plain: undefined },
 } as const satisfies Record<string, unknown> & { syntax: Record<Token, string | undefined> };
 
@@ -198,13 +199,17 @@ function codeLines({ path, segments, side, gutter, notesAt }: CodeBlock, total: 
   const room = Math.max(total - lead, 8);
   const out: Array<Line> = [];
   segments.forEach((rows, index) => {
+    // Template strings and block comments carry their color across rows.
+    let open: Open = null;
     if (index > 0) out.push(pad(withBg([{ text: `${" ".repeat(lane + gutter)}⋯`, color: THEME.faint }], THEME.codeBg), total, THEME.codeBg));
     for (const row of rows) {
       const tone = row.kind === "context" ? null : THEME[row.kind];
       const bg = tone && tinted ? tone.bg : THEME.codeBg;
       const anchor = side === "new" ? row.newLine : row.oldLine;
       const notes = anchor === null ? undefined : notesAt?.get(anchor);
-      const code = tokenize(row.text.replaceAll("\t", "    "), path).map(({ text, token }) => ({ text, color: THEME.syntax[token] ?? THEME.text }));
+      const lexed = tokenize(row.text.replaceAll("\t", "    "), path, open);
+      open = lexed.open;
+      const code = lexed.tokens.map(({ text, token }) => ({ text, color: THEME.syntax[token] ?? THEME.text }));
       wrapCode(code, room).forEach((piece, pieceIndex) => {
         const first = pieceIndex === 0;
         const markers = first && notes ? notes.map((n) => n.marker).join("") : "";
@@ -366,7 +371,8 @@ export function stopLines({ stop, onward, files, showFileDiffs }: StopView, tota
     out.push(
       BLANK,
       ...card(
-        [[{ text: ATTENTION_LABELS[stop.attention.kind], color: THEME.attention, bold: true }], ...prose(stop.attention.note, measure - 4)],
+        // Amber but not bold, so the stop title stays the loudest line.
+        [[{ text: ATTENTION_LABELS[stop.attention.kind], color: THEME.attention }], ...prose(stop.attention.note, measure - 4)],
         measure,
       ),
     );
@@ -421,7 +427,7 @@ export function stopLines({ stop, onward, files, showFileDiffs }: StopView, tota
     out.push(BLANK);
     filesAt = out.length;
     out.push([...heading(stop.excerpts.length > 0 ? "Also in this stop" : "Files in this stop"), { text: "  " }, chip(`f ${showFileDiffs ? "▾" : "▸"}`)]);
-    for (const other of others) {
+    others.forEach((other, otherIndex) => {
       const file = files.get(other.path);
       const header = out.length;
       const counts = file ? [{ text: "  " }, ...stats(file)] : [];
@@ -431,6 +437,7 @@ export function stopLines({ stop, onward, files, showFileDiffs }: StopView, tota
           : [[...pathSpans(fitPath(other.path, total - width(counts))), ...counts]]),
       );
       if (other.note.trim() !== "") out.push(...prose(other.note, measure, { color: THEME.muted }, "  "));
+      if (!showFileDiffs && otherIndex < others.length - 1) out.push(BLANK);
       if (showFileDiffs) {
         out.push(
           ...(file === undefined
@@ -444,7 +451,7 @@ export function stopLines({ stop, onward, files, showFileDiffs }: StopView, tota
         blocks.push({ caption: null, header, end: out.length, ...(pinned && { pinned }) });
         out.push(BLANK);
       }
-    }
+    });
   }
 
   if (stop.questions.length > 0) {
@@ -454,7 +461,11 @@ export function stopLines({ stop, onward, files, showFileDiffs }: StopView, tota
     }
   }
 
-  out.push(BLANK, [{ text: "─".repeat(total), color: THEME.rule }]);
+  // A stop with no code keeps its rule and keys at the prose edge.
+  const wide = blocks.length > 0 || stop.excerpts.length > 0;
+  out.push(BLANK);
+  const ruleAt = out.length;
+  out.push([{ text: "─".repeat(wide ? total : measure), color: THEME.rule }]);
   if (onward.kind === "next") {
     const lead = `  ${onward.label}  `;
     out.push(
@@ -467,7 +478,7 @@ export function stopLines({ stop, onward, files, showFileDiffs }: StopView, tota
   } else {
     out.push([{ text: "That's the tour", color: THEME.strong, bold: true }, { text: "   " }, chip("o"), { text: "  Open the PR", color: THEME.text }]);
   }
-  return { lines: out, filesAt, blocks };
+  return { lines: out, filesAt, blocks, ruleAt, wide };
 }
 
 export interface RailView {
@@ -515,7 +526,7 @@ function railRows({ stops, position, seen }: RailView, railWidth: number, maxLin
     title.forEach((line, i) => out.push(paint([...(i === 0 ? bullet : [{ text: "    " }]), { text: " " }, ...line])));
     out.push(
       paint([
-        { text: "    " },
+        { text: "     " },
         ...(markAttention && stop.attention !== null ? [{ text: "◆ ", color: THEME.attention }] : []),
         { text: stopSubline(stop), color: active ? THEME.muted : THEME.faint },
       ]),

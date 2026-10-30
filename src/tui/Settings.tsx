@@ -90,7 +90,8 @@ export function Settings({
           const active = index === selected;
           const label = row.options.find((option) => option.id === row.current)?.label ?? row.current;
           const fixed = row.options.length < 2;
-          const arrow = active && !fixed ? THEME.accent : THEME.faint;
+          // Like the rail, only the selected row shows its controls.
+          const arrow = active && !fixed ? THEME.accent : THEME.background;
           const line: Line = [
             { text: active ? "▌" : " ", color: THEME.accent },
             { text: ` ${row.label.padEnd(12)}`, color: active ? THEME.strong : THEME.text, bold: active },
