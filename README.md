@@ -1,6 +1,8 @@
 # pr-guide
 
-A guided tour of a pull request, written by your own Claude or Codex. The flow, prompt and tour layout come from t3code's review guides.
+> **Heads up:** the whole concept is stolen from [t3code](https://github.com/pingdotgg/t3code)'s review guides: the flow, the prompt and the tour layout. If you can't sit still long enough to read the code, go use the real thing there.
+
+A guided tour of a pull request, written by your own Claude or Codex, in your terminal.
 
 ```sh
 npx /path/to/pr-guide 27                 # PR #27 of the repo you're in
