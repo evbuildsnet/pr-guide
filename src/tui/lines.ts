@@ -39,7 +39,7 @@ export const THEME = {
   /** Rows pinned over a scrolled code block. */
   pinnedBg: "#343a46",
   /** Read stops in the rail recede, so what's left stands out. */
-  read: "#8b93a1",
+  read: "#7f8794",
   thumb: "#737d8c",
   code: "#e6e8ec",
   codeChip: "#3e4451",
@@ -56,7 +56,7 @@ export const THEME = {
   // Removed lines keep their old-file number, dimmer so it reads as another coordinate, not a miscount.
   addition: { sign: "#98c379", number: "#98c379", bg: "#263229" },
   deletion: { sign: "#e06c75", number: "#cf8993", bg: "#36272b" },
-  syntax: { comment: "#8f98a6", string: "#98c379", number: "#d19a66", keyword: "#c678dd", plain: undefined },
+  syntax: { comment: "#969fad", string: "#98c379", number: "#d19a66", keyword: "#c678dd", plain: undefined },
 } as const satisfies Record<string, unknown> & { syntax: Record<Token, string | undefined> };
 
 /** Prose wraps at a comfortable reading measure; code takes the full width. */
@@ -337,7 +337,15 @@ function fileCode(file: DiffFile, gutter: number, total: number, measure: number
   const { kept, hidden } = capRows(file.hunks.map((hunk) => hunk.rows), FILE_ROWS);
   return [
     ...codeLines({ path: file.path, segments: kept, side: "new", gutter }, total, measure),
-    ...(hidden > 0 ? [pad(withBg([{ text: `${" ".repeat(gutter + 3)}⋯ ${hidden} more lines in the PR`, color: THEME.faint }], THEME.codeBg), total, THEME.codeBg)] : []),
+    ...(hidden > 0
+      ? [
+          pad(
+            withBg([{ text: `${" ".repeat(gutter + 3)}⋯ ${hidden} more lines in the PR  `, color: THEME.faint }, chip("o"), { text: "  Open the PR", color: THEME.text }], THEME.codeBg),
+            total,
+            THEME.codeBg,
+          ),
+        ]
+      : []),
   ];
 }
 
@@ -467,7 +475,7 @@ export function stopLines({ stop, onward, files, showFileDiffs }: StopView, tota
         // Pinned, the header carries the collapse key, since the section's own key has scrolled away.
         const pinned = blockHeader({ path: other.path, counts: file ?? null, trailing: [chip("f ▾")] }, total, measure).at(-1);
         blocks.push({ caption, header, end: out.length, ...(pinned && { pinned }) });
-        out.push(BLANK);
+        if (otherIndex < others.length - 1) out.push(BLANK);
       }
     });
   }
@@ -487,14 +495,15 @@ export function stopLines({ stop, onward, files, showFileDiffs }: StopView, tota
   if (onward.kind === "next") {
     const lead = `  ${onward.label}  `;
     out.push(
-      ...prose(onward.title, Math.min(total, MEASURE + 3 + lead.length), { color: THEME.text }, " ".repeat(3 + lead.length)).map((line, i) =>
+      // The title ends where the rule above it does.
+      ...prose(onward.title, wide ? total : measure, { color: THEME.text }, " ".repeat(3 + lead.length)).map((line, i) =>
         i === 0 ? [chip("→"), { text: lead, color: THEME.muted }, ...line.slice(1)] : line,
       ),
     );
   } else if (onward.kind === "finish") {
-    out.push([chip("→"), { text: "  Finish the tour", color: THEME.text, bold: true }]);
+    out.push([chip("→"), { text: "  Finish the tour", color: THEME.bright }]);
   } else {
-    out.push([{ text: "That's the tour", color: THEME.strong, bold: true }, { text: "   " }, chip("o"), { text: "  Open the PR", color: THEME.text }]);
+    out.push([{ text: "That's the tour", color: THEME.bright }, { text: "   " }, chip("o"), { text: "  Open the PR", color: THEME.text }]);
   }
   return { lines: out, filesAt, blocks, ruleAt, wide };
 }

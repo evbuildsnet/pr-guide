@@ -17,13 +17,23 @@ export const maxScroll = ({ lines, rows }: Pane) => Math.max(lines.length - rows
  */
 export function layout(pane: Pane, top: number) {
   const { lines, blocks, rows } = pane;
-  const rowsOf = (block: Block) => [...(block.caption !== null ? [block.caption] : []), block.header];
+  // Up to two caption rows pin, so a two-line caption stays a whole sentence.
+  const captionRows = (block: Block) => (block.caption === null ? [] : [block.caption, block.caption + 1].filter((index) => index < block.header));
+  const rowsOf = (block: Block) => [...captionRows(block), block.header];
   const block = blocks.find((candidate) => (candidate.caption ?? candidate.header) < top && top + rowsOf(candidate).length < candidate.end);
   const pinned = block ? rowsOf(block) : [];
   // Pinned rows sit on a raised tint, the usual cue for a sticky header.
-  const pins = pinned.map((index) =>
-    (index === block?.header ? (block.pinned ?? lines[index] ?? []) : (lines[index] ?? [])).map((span) => ({ ...span, bg: THEME.pinnedBg })),
-  );
+  // A longer caption ends its second pinned row on an ellipsis.
+  const cut = block !== undefined && block.caption !== null && block.header - block.caption > 2;
+  const pins = pinned.map((index, i) => {
+    const line = index === block?.header ? (block.pinned ?? lines[index] ?? []) : (lines[index] ?? []);
+    const raised = line.map((span) => ({ ...span, bg: THEME.pinnedBg }));
+    if (!(cut && i === 1)) return raised;
+    const full = raised.map((span) => span.text).join("");
+    const text = `${full.trimEnd().slice(0, -1)}…`;
+    const style = raised.find((span) => span.color !== undefined) ?? raised[0];
+    return [{ ...style, text: text.padEnd(full.length) }];
+  });
   let from = top + pins.length;
   if (top < maxScroll(pane)) while (from > 0 && isContinuation(lines[from] ?? [])) from--;
   else while (from < lines.length - 1 && isContinuation(lines[from] ?? [])) from++;

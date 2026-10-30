@@ -85,7 +85,7 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
     (input, key) => {
       const pr = screen.kind === "loading" ? null : screen.pr;
       if (helpOpen) {
-        // Keys the list advertises work from it; anything else just closes it.
+        // Any key closes the list; the keys it advertises also act, here or in the tour.
         setHelpOpen(false);
         if (!"qsor".includes(input) || input === "") return;
       }
@@ -168,8 +168,9 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
             guide={screen.guide}
             columns={columns}
             rows={bodyRows}
-            active={!overlay && !helpOpen}
-            cover={helpOpen ? (onward) => <Help onward={onward} /> : undefined}
+            // Under the key list the tour still listens, so a key from the list closes it and acts at once.
+            active={!overlay}
+            cover={helpOpen ? (context) => <Help {...context} /> : undefined}
           />
         </Box>
       ) : null}
@@ -212,12 +213,17 @@ const HELP: ReadonlyArray<readonly [string, string]> = [
 ];
 
 /** The key list, as a card in the main pane. */
-function Help({ onward = "Next stop" }: { onward?: string }) {
+function Help({ onward = "Next stop", stops = 9 }: { onward?: string; stops?: number }) {
   const rows: Array<Line> = [
     [{ text: "Keys", color: THEME.strong, bold: true }, { text: " ".repeat(48) }, chip("esc")],
     [],
     ...HELP.map(([keys, label], index): Line => {
-      const caps = keys.split("  ").flatMap((key, i) => [...(i > 0 ? [{ text: " " }] : []), chip(key)]);
+      const shown = keys === "1–9" ? `1–${Math.min(stops, 9)}` : keys;
+      // A lone letter reads fine bare; stacked caps would merge into one bar.
+      const caps =
+        shown.length === 1
+          ? [{ text: ` ${shown} `, color: THEME.bright, bold: true }]
+          : shown.split("  ").flatMap((key, i) => [...(i > 0 ? [{ text: " " }] : []), chip(key)]);
       const used = caps.reduce((sum, span) => sum + span.text.length, 0);
       return [...caps, { text: " ".repeat(Math.max(18 - used, 1)) }, { text: index === 0 ? onward : label, color: THEME.text }];
     }),

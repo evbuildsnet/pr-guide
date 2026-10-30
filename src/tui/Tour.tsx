@@ -7,7 +7,7 @@ import { chip, railLines, stopLines, THEME, type Line, type Onward, type Span } 
 import { layout, pageDown, settle } from "./viewport.ts";
 
 /** The rail hides, as t3code drops it on narrow panes, when keeping it would leave code less than this. */
-const CODE_MIN_COLUMNS = 96;
+const CODE_MIN_COLUMNS = 100;
 /** Code fills the content column up to this width; prose keeps its own 80-column measure inside it. */
 const CONTENT_MAX = 160;
 const railWidth = (columns: number) => (columns >= 180 ? 40 : columns >= 150 ? 34 : 28);
@@ -56,7 +56,7 @@ export function Tour({
   rows: number;
   active: boolean;
   /** Shown in place of the stop, keeping the rail, e.g. the key list. Told what → does here. */
-  cover?: (onward: string) => ReactNode;
+  cover?: (context: { onward: string; stops: number }) => ReactNode;
 }) {
   const [position, setPosition] = useState(0);
   const [seen, setSeen] = useState<ReadonlySet<number>>(new Set());
@@ -208,7 +208,14 @@ export function Tour({
         <Box height={1} />
         <Box flexDirection="row" height={paneRows}>
           <Box flexDirection="column" width={paneWidth} overflow="hidden">
-            {cover ? cover(onward.kind === "next" ? (onward.label === "Next" ? "Next stop" : "Next unread stop") : onward.kind === "finish" ? "Finish the tour" : "Nothing next: the tour is done") : <Lines lines={visible} />}
+            {cover ? (
+              cover({
+                onward: onward.kind === "next" ? (onward.label === "Next" ? "Next stop" : "Next unread stop") : onward.kind === "finish" ? "Finish the tour" : "Nothing next: the tour is done",
+                stops: stopCount,
+              })
+            ) : (
+              <Lines lines={visible} />
+            )}
           </Box>
           <Box width={1} flexDirection="column" overflow="hidden">
             <Lines lines={covered ? [] : scrollbar(paneRows, lines.length, top)} />
