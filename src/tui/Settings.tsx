@@ -13,7 +13,8 @@ interface Row {
   readonly apply: (id: string) => SettingsData;
 }
 
-const ROW_WIDTH = 40;
+/** Rows, the title's esc and the description share one edge. */
+const ROW_WIDTH = 72;
 
 const cycle = <T,>(items: ReadonlyArray<T>, current: T, delta: number): T =>
   items[(items.indexOf(current) + delta + items.length) % items.length] ?? current;

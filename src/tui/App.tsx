@@ -104,8 +104,14 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
 
   const pr = screen.kind === "loading" ? null : screen.pr;
   const stale = screen.kind === "tour" && screen.guide.headSha !== screen.pr.headSha;
+  // The PR's size, as t3code shows it, once the guide has the diff.
+  const size =
+    screen.kind === "tour"
+      ? screen.guide.files.reduce((sum, file) => ({ files: sum.files + 1, additions: sum.additions + file.additions, deletions: sum.deletions + file.deletions }), { files: 0, additions: 0, deletions: 0 })
+      : null;
   const header = (
     <Box paddingX={1}>
+      <Box flexGrow={1} flexShrink={1}>
       <Text wrap="truncate-end">
         {pr ? (
           <>
@@ -116,6 +122,16 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
           <Text color={THEME.muted}>pr-guide</Text>
         )}
       </Text>
+      </Box>
+      {size ? (
+        <Box flexShrink={0} marginLeft={2}>
+          <Text>
+            <Text color={THEME.faint}>{`${size.files} files  `}</Text>
+            <Text color={THEME.addition.sign}>{`+${size.additions.toLocaleString("en-US")}`}</Text>
+            <Text color={THEME.deletion.sign}>{` −${size.deletions.toLocaleString("en-US")}`}</Text>
+          </Text>
+        </Box>
+      ) : null}
     </Box>
   );
 
@@ -149,7 +165,7 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
             columns={columns}
             rows={bodyRows}
             active={!overlay && !helpOpen}
-            cover={helpOpen ? <Help /> : undefined}
+            cover={helpOpen ? (onward) => <Help onward={onward} /> : undefined}
           />
         </Box>
       ) : null}
@@ -192,19 +208,19 @@ const HELP: ReadonlyArray<readonly [string, string]> = [
 ];
 
 /** The key list, as a card in the main pane. */
-function Help() {
+function Help({ onward = "Next stop" }: { onward?: string }) {
   const rows: Array<Line> = [
     [{ text: "Keys", color: THEME.strong, bold: true }, { text: " ".repeat(48) }, chip("esc")],
     [],
-    ...HELP.map(([keys, label]): Line => {
+    ...HELP.map(([keys, label], index): Line => {
       const caps = keys.split("  ").flatMap((key, i) => [...(i > 0 ? [{ text: " " }] : []), chip(key)]);
       const used = caps.reduce((sum, span) => sum + span.text.length, 0);
-      return [...caps, { text: " ".repeat(Math.max(18 - used, 1)) }, { text: label, color: THEME.text }];
+      return [...caps, { text: " ".repeat(Math.max(18 - used, 1)) }, { text: index === 0 ? onward : label, color: THEME.text }];
     }),
   ];
   return (
     <Box paddingY={1}>
-      <Lines lines={card([[], ...rows, []], 60, THEME.border)} />
+      <Lines lines={card([...rows, []], 60, THEME.border)} />
     </Box>
   );
 }

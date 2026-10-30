@@ -193,39 +193,38 @@ function codeLines({ path, segments, side, gutter, notesAt }: CodeBlock, total: 
   const numberOf = (row: DiffRow) =>
     row.kind === "addition" ? row.newLine : row.kind === "deletion" ? row.oldLine : side === "new" ? row.newLine : row.oldLine;
   const tinted = segments.flat().some((row) => row.kind !== "addition");
-  // The marker lane is always there, so gutters line up from block to block.
-  const lane = Math.max(4, ...[...(notesAt?.values() ?? [])].map((notes) => notes.length + 3));
-  const lead = lane + gutter + 1 + 2;
+  const lead = gutter + 1 + 2;
   const room = Math.max(total - lead, 8);
   const out: Array<Line> = [];
   segments.forEach((rows, index) => {
     // Template strings and block comments carry their color across rows.
-    let open: Open = null;
-    if (index > 0) out.push(pad(withBg([{ text: `${" ".repeat(lane + gutter)}⋯`, color: THEME.faint }], THEME.codeBg), total, THEME.codeBg));
+    // Old and new code each keep their own: a removed opening backtick mustn't color the added lines.
+    const open: { old: Open; new: Open } = { old: null, new: null };
+    if (index > 0) out.push(pad(withBg([{ text: `${" ".repeat(gutter)}⋯`, color: THEME.faint }], THEME.codeBg), total, THEME.codeBg));
     for (const row of rows) {
       const tone = row.kind === "context" ? null : THEME[row.kind];
       const bg = tone && tinted ? tone.bg : THEME.codeBg;
       const anchor = side === "new" ? row.newLine : row.oldLine;
       const notes = anchor === null ? undefined : notesAt?.get(anchor);
-      const lexed = tokenize(row.text.replaceAll("\t", "    "), path, open);
-      open = lexed.open;
+      const lexed = tokenize(row.text.replaceAll("\t", "    "), path, row.kind === "deletion" ? open.old : open.new);
+      if (row.kind !== "addition") open.old = lexed.open;
+      if (row.kind !== "deletion") open.new = lexed.open;
       const code = lexed.tokens.map(({ text, token }) => ({ text, color: THEME.syntax[token] ?? THEME.text }));
       wrapCode(code, room).forEach((piece, pieceIndex) => {
         const first = pieceIndex === 0;
-        const markers = first && notes ? notes.map((n) => n.marker).join("") : "";
-        // The sign sits against its number, so "+95" and "+1632" read the same way.
+        // The note card right under the line carries its letter; the line's number turns blue to anchor it.
+        const anchored = first && notes !== undefined;
+        // The sign sits against its number, so "+95" and "+1632" read the same way. An all-added band
+        // needs no signs at all.
         const number = first ? String(numberOf(row) ?? "") : "";
-        const sign = first && tone ? (row.kind === "addition" ? "+" : "−") : "";
+        const sign = first && tone && tinted ? (row.kind === "addition" ? "+" : "−") : "";
         out.push(
           pad(
             withBg(
               [
-                ...(markers
-                  ? [{ text: ` ${markers} `, color: "#1d1f21", bg: THEME.accent, bold: true }, { text: " ".repeat(lane - markers.length - 2) }]
-                  : [{ text: " ".repeat(lane) }]),
                 { text: " ".repeat(gutter + 1 - number.length - sign.length) },
                 { text: sign, color: tone?.sign },
-                { text: number, color: tone ? tone.number : THEME.faint },
+                { text: number, color: anchored ? THEME.accent : tone ? tone.number : THEME.faint, bold: anchored },
                 { text: first ? "  " : CONTINUATION, color: THEME.faint },
                 ...piece,
               ],
@@ -252,7 +251,8 @@ function noteCard(marker: string, note: Note, indent: number, total: number, mea
   const cardWidth = Math.min(measure, total - indent + 2);
   const body = note.body.trim() === "" ? [] : prose(note.body, cardWidth - 3);
   const rows = card([...markedTitle(marker, note.title, cardWidth - 3), ...body], cardWidth, THEME.accent);
-  return rows.map((line) => pad(withBg([{ text: " ".repeat(indent - 2) }, ...line], THEME.codeBg), total, THEME.codeBg));
+  // A row of code surface after the card, so the code visibly resumes.
+  return [...rows, []].map((line) => pad(withBg([{ text: " ".repeat(indent - 2) }, ...line], THEME.codeBg), total, THEME.codeBg));
 }
 
 /** A note's letter chip and title, the title wrapping under itself. */
@@ -429,14 +429,16 @@ export function stopLines({ stop, onward, files, showFileDiffs }: StopView, tota
     out.push([...heading(stop.excerpts.length > 0 ? "Also in this stop" : "Files in this stop"), { text: "  " }, chip(`f ${showFileDiffs ? "▾" : "▸"}`)]);
     others.forEach((other, otherIndex) => {
       const file = files.get(other.path);
-      const header = out.length;
+      const start = out.length;
       const counts = file ? [{ text: "  " }, ...stats(file)] : [];
       out.push(
         ...(showFileDiffs
-          ? blockHeader({ path: other.path, counts: file ?? null }, total, measure)
+          ? // Expanded, a file takes the excerpt card's shape: its note as the caption, then path, then code.
+            blockHeader({ path: other.path, counts: file ?? null, caption: other.note }, total, measure)
           : [[...pathSpans(fitPath(other.path, total - width(counts))), ...counts]]),
       );
-      if (other.note.trim() !== "") out.push(...prose(other.note, measure, { color: THEME.muted }, "  "));
+      const header = out.length - 1;
+      if (!showFileDiffs && other.note.trim() !== "") out.push(...prose(other.note, measure, { color: THEME.muted }, "  "));
       if (!showFileDiffs && otherIndex < others.length - 1) out.push(BLANK);
       if (showFileDiffs) {
         out.push(
@@ -446,9 +448,10 @@ export function stopLines({ stop, onward, files, showFileDiffs }: StopView, tota
               ? [[{ text: "  No text changes (binary, rename or mode change).", color: THEME.muted }]]
               : fileCode(file, gutter, total, measure)),
         );
+        const caption = other.note.trim() ? start : null;
         // Pinned, the header carries the collapse key, since the section's own key has scrolled away.
         const pinned = blockHeader({ path: other.path, counts: file ?? null, trailing: [chip("f ▾")] }, total, measure).at(-1);
-        blocks.push({ caption: null, header, end: out.length, ...(pinned && { pinned }) });
+        blocks.push({ caption, header, end: out.length, ...(pinned && { pinned }) });
         out.push(BLANK);
       }
     });
@@ -489,9 +492,8 @@ export interface RailView {
 
 /** The numbered stop list with read checkmarks, as in t3code's GuideRail. Returns where the active stop sits. */
 export function railLines(view: RailView, railWidth: number, rows: number) {
-  // Titles get a fourth line when the whole list still fits.
-  const roomy = railRows(view, railWidth, 4);
-  return roomy.lines.length <= rows ? roomy : railRows(view, railWidth, 3);
+  // Titles get more lines when the whole list still fits.
+  return [5, 4].map((lines) => railRows(view, railWidth, lines)).find((rail) => rail.lines.length <= rows) ?? railRows(view, railWidth, 3);
 }
 
 function railRows({ stops, position, seen }: RailView, railWidth: number, maxLines: number) {
