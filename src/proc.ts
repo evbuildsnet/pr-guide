@@ -24,6 +24,8 @@ export function run(
     options.signal?.throwIfAborted();
     const child = spawn(command, args, {
       cwd: options.cwd,
+      // The tour owns the terminal, so a git credential prompt would hang unseen: fail instead.
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
