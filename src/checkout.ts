@@ -43,15 +43,22 @@ async function localRepo(pr: PullRequest, cwd: string): Promise<Repo | null> {
   return null;
 }
 
-/** Otherwise a cached blobless bare clone, made through gh or glab so their auth applies. */
+/** Otherwise a cached blobless bare clone over HTTPS. */
 const cachedRepoDir = (pr: PullRequest) => join(cacheDir, "repos", pr.hostname, `${pr.repo}.git`);
 
 async function cachedRepo(pr: PullRequest, signal: AbortSignal): Promise<Repo> {
   const gitDir = cachedRepoDir(pr);
   if (!existsSync(gitDir)) {
     await mkdir(dirname(gitDir), { recursive: true });
-    const [cli, source] = pr.host === "github" ? ["gh", `${pr.hostname}/${pr.repo}`] : ["glab", `https://${pr.hostname}/${pr.repo}`];
-    await runOk(cli, ["repo", "clone", source, gitDir, "--", "--bare", "--filter=blob:none", "--quiet"], { signal });
+    // The clone's own config borrows the login gh or glab already holds, so every later fetch
+    // (blobs arrive lazily) is authenticated without touching the user's git config. The empty
+    // first value stops other helpers, like the macOS keychain, from saving the token.
+    const helper = `credential.helper=!${pr.host === "github" ? "gh" : "glab"} auth git-credential`;
+    await runOk(
+      "git",
+      ["clone", "--bare", "--filter=blob:none", "--quiet", "-c", "credential.helper=", "-c", helper, `https://${pr.hostname}/${pr.repo}.git`, gitDir],
+      { signal },
+    );
   }
   return { gitDir, remote: "origin" };
 }
