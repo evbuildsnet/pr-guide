@@ -14,4 +14,4 @@ Tour keys: `j`/`k` stops · `↑↓` `space` `b` scroll · `1-9` jump · `f` fil
 
 Needs `gh` or `glab`, and one of `claude`, `codex` or `agy` (Antigravity, for Gemini), each logged in. The agent runs read-only in a temporary worktree at the PR head. If you're inside a clone of the repo, that clone is used; otherwise a blobless clone is cached in the system temp folder.
 
-Guides are saved per PR in the system temp folder (`$TMPDIR/pr-guide`), so a restart clears them. Settings (harness, model, reasoning, speed) are in `~/.config/pr-guide/settings.json`. Press `s` in the tour to pick from every harness and model; a harness whose CLI isn't installed is grayed out.
+Guides are saved per PR in the system temp folder (`$TMPDIR/pr-guide`), so a restart clears them. Settings (harness, model, reasoning, speed) are in `~/.config/pr-guide/settings.json`. Press `s` in the tour to pick from every harness and model; a harness whose CLI isn't installed is grayed out, and so is a model your account can't use.

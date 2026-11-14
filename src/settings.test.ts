@@ -19,7 +19,7 @@ test("settings saved before Antigravity existed keep their choices", () => {
   const saved = {
     provider: "codex",
     claude: { model: "claude-haiku-5-5", effort: "low", tier: "standard" },
-    codex: { model: "gpt-6-luna", effort: "medium", tier: "fast" },
+    codex: { model: "gpt-6-astra", effort: "medium", tier: "fast" },
   };
   mkdirSync(dirname(settingsPath), { recursive: true });
   writeFileSync(settingsPath, JSON.stringify(saved));

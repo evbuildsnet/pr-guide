@@ -39,8 +39,7 @@ export const PROVIDERS = {
     cli: "claude",
     models: [
       { slug: "claude-opus-5-5", label: "Opus 5.5", tiers: ["standard", "fast"] },
-      { slug: "claude-sonnet-5-5", label: "Sonnet 5.5", tiers: ["standard"] },
-      { slug: "claude-fable-5-1", label: "Fable 5.1", tiers: ["standard"] },
+      { slug: "claude-fable-5-2", label: "Fable 5.2", tiers: ["standard"] },
       { slug: "claude-haiku-5-5", label: "Haiku 5.5", tiers: ["standard"] },
     ],
     defaults: { model: "claude-opus-5-5", effort: "high", tier: "standard" },
@@ -51,7 +50,6 @@ export const PROVIDERS = {
     models: [
       { slug: "gpt-6.1-sol", label: "GPT-6.1 Sol", tiers: ["standard", "fast", "ultrafast"] },
       { slug: "gpt-6-astra", label: "GPT-6 Astra", tiers: ["standard", "fast", "ultrafast"] },
-      { slug: "gpt-6-luna", label: "GPT-6 Luna", tiers: ["standard", "fast"] },
     ],
     defaults: { model: "gpt-6.1-sol", effort: "high", tier: "standard" },
   },
@@ -59,9 +57,9 @@ export const PROVIDERS = {
     label: "Antigravity",
     cli: "agy",
     models: [
+      { slug: "gemini-4-carbon", label: "Gemini 4 Carbon", tiers: ["standard"], efforts: ["low", "medium", "high"] },
       { slug: "gemini-3.1-pro", label: "Gemini 3.1 Pro", tiers: ["standard"], efforts: ["low", "high"] },
       { slug: "gemini-3.8-flash", label: "Gemini 3.8 Flash", tiers: ["standard"], efforts: ["low", "medium", "high"] },
-      { slug: "gemini-3.7-flash", label: "Gemini 3.7 Flash", tiers: ["standard"], efforts: ["low", "medium", "high"] },
     ],
     defaults: { model: "gemini-3.1-pro", effort: "high", tier: "standard" },
   },

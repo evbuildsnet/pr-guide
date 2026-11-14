@@ -8,11 +8,11 @@ interface Logo {
   readonly rows: ReadonlyArray<string>;
 }
 
-/** Each harness's mark, traced from its logo onto a grid of 16 by 16 dots. */
+/** Each harness's mark on a grid of 16 by 16 dots: Clawd, Claude Code's mascot, and the other two traced from their logos. */
 const LOGOS = {
   claude: {
     colors: ["#d97757"],
-    rows: [" ⡀⢷⡀⣴⢀⡤ ", "⢀⠙⠲⣷⣷⣟⣁⡄", " ⣠⠽⡿⣿⣯⡒⠒", "  ⠊⢰⠁⠙⠈ "],
+    rows: [" ⣤⣤⣤⣤⣤⣤ ", "⣀⣿⣀⣿⣿⣀⣿⣀", "⠉⢿⢿⠿⠿⡿⡿⠉", " ⠘⠘  ⠃⠃ "],
   },
   codex: {
     colors: ["#ffffff"],

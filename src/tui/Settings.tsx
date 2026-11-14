@@ -1,8 +1,9 @@
 import { Box, useInput } from "ink";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { describeChoice, EFFORT_LABELS, effortsFor, PROVIDERS, PROVIDER_IDS, TIER_LABELS, tiersFor, type ModelChoice, type ProviderId } from "../catalog.ts";
 import { onPath } from "../proc.ts";
+import { availableModels } from "../runners.ts";
 import { activeChoice, sanitizeChoice, saveSettings, type Settings as SettingsData } from "../settings.ts";
 import { chip, pad, prose, THEME, width, type Line } from "./lines.ts";
 import { logo } from "./logos.ts";
@@ -24,7 +25,7 @@ const cycle = <T,>(items: ReadonlyArray<T>, current: T, delta: number): T =>
 
 /**
  * Every harness and its models at once, as in t3code's model picker, above reasoning and speed.
- * Saved on every change.
+ * A harness without its CLI and a model the account can't use are grayed out. Saved on every change.
  */
 export function Settings({
   settings,
@@ -45,8 +46,15 @@ export function Settings({
 }) {
   const choice = activeChoice(settings);
   const provider = choice.provider;
-  // A harness without its CLI is shown, grayed out, and can't be picked.
   const [installed] = useState(() => new Set(PROVIDER_IDS.filter((id) => onPath(PROVIDERS[id].cli))));
+  /** What each CLI says the account can use. Until it answers, and if it can't, nothing is ruled out. */
+  const [offered, setOffered] = useState<Partial<Record<ProviderId, ReadonlySet<string> | null>>>({});
+  useEffect(() => {
+    let open = true;
+    for (const id of installed) void availableModels(id).then((models) => open && setOffered((current) => ({ ...current, [id]: models })));
+    return () => void (open = false);
+  }, [installed]);
+  const usable = (id: ProviderId, slug: string) => installed.has(id) && (offered[id]?.has(slug) ?? true);
   /** 0 is the model picker; the rows below it follow. */
   const [selected, setSelected] = useState(0);
   const [cursor, setCursor] = useState<{ readonly provider: ProviderId; readonly index: number }>(() => ({
@@ -91,7 +99,7 @@ export function Settings({
       if (key.return || input === " ") {
         // Enter on the model already in use has nothing left to choose, so it closes like esc.
         if (chosen) return key.return ? onClose() : undefined;
-        if (pointed === undefined || !installed.has(cursor.provider)) return;
+        if (pointed === undefined || !usable(cursor.provider, pointed.slug)) return;
         const { provider: _, ...next } = sanitizeChoice(cursor.provider, { ...settings[cursor.provider], model: pointed.slug });
         return commit({ ...settings, provider: cursor.provider, [cursor.provider]: next });
       }
@@ -119,12 +127,12 @@ export function Settings({
   });
 
   const column = (id: ProviderId, logos: boolean): ReadonlyArray<Line> => {
-    const usable = installed.has(id);
+    const present = installed.has(id);
     const { label, cli, models } = PROVIDERS[id];
     return [
-      ...(logos ? [...logo(id, !usable).map((line): Line => [{ text: "  " }, ...line]), []] : []),
-      [{ text: `  ${label}`, color: usable ? THEME.strong : THEME.disabled, bold: true }],
-      [{ text: `  ${cli}${usable ? "" : " not found"}`, color: usable ? THEME.faint : THEME.disabled }],
+      ...(logos ? [...logo(id, !present).map((line): Line => [{ text: "  " }, ...line]), []] : []),
+      [{ text: `  ${label}`, color: present ? THEME.strong : THEME.disabled, bold: true }],
+      [{ text: `  ${cli}${present ? "" : " not found"}`, color: present ? THEME.faint : THEME.disabled }],
       [],
       ...models.map((model, index): Line => {
         const inUse = id === provider && model.slug === choice.model;
@@ -132,7 +140,7 @@ export function Settings({
         const line: Line = [
           { text: active ? "▌" : " ", color: THEME.accent },
           { text: inUse ? " ● " : "   ", color: THEME.accent },
-          { text: model.label, color: !usable ? THEME.disabled : inUse ? THEME.strong : active ? THEME.bright : THEME.soft, bold: inUse },
+          { text: model.label, color: !usable(id, model.slug) ? THEME.disabled : inUse ? THEME.strong : active ? THEME.bright : THEME.soft, bold: inUse },
         ];
         return active ? pad(line, COLUMN_WIDTH - 1).map((span) => ({ ...span, bg: THEME.selection })) : line;
       }),
@@ -150,7 +158,12 @@ export function Settings({
   const around = 2 + rows.length + description.length + note.length + (note.length > 0 ? 4 : 3);
   const withLogos = picker(true);
 
-  const hint: Line = selected === 0 && !chosen && installed.has(cursor.provider) ? [chip("enter"), { text: " use this model   ", color: THEME.muted }] : [];
+  const hint: Line =
+    selected !== 0 || chosen || pointed === undefined
+      ? []
+      : usable(cursor.provider, pointed.slug)
+        ? [chip("enter"), { text: " use this model   ", color: THEME.muted }]
+        : [{ text: "not available to your account   ", color: THEME.muted }];
   const keys: Line = [...hint, chip("esc")];
 
   return (
