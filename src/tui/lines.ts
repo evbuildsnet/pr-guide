@@ -1,6 +1,6 @@
 import { excerptRows } from "../diff.ts";
-import type { DiffFile, DiffRow, Excerpt, Note, Stop } from "../model.ts";
-import { ATTENTION_LABELS, letterStopNotes, otherFiles, stopSubline } from "../tour.ts";
+import type { DiffFile, DiffRow, Excerpt, Guide, Note, Stop } from "../model.ts";
+import { ATTENTION_LABELS, guideStats, letterStopNotes, otherFiles, stopSubline } from "../tour.ts";
 import { tokenize, type Open, type Token } from "./syntax.ts";
 
 /** A styled run of text. A stop is drawn as an array of lines so the pane can scroll it. */
@@ -69,6 +69,32 @@ export const isContinuation = (line: Line) => line.some((span) => span.cont === 
 export const width = (line: Line) => line.reduce((sum, span) => sum + span.text.length, 0);
 export const pad = (line: Line, to: number, bg?: string): Line => [...line, { text: " ".repeat(Math.max(to - width(line), 0)), bg }];
 const withBg = (line: Line, bg: string): Line => line.map((span) => ({ ...span, bg: span.bg ?? bg }));
+
+/**
+ * The header's right side: the PR's size, how the guide was written, and the commit it describes,
+ * at most `room` wide. Narrow terminals drop facts, tokens first; the commit always stays, so a
+ * screenshot still says which snapshot the guide is about.
+ */
+export function headerFacts(guide: Guide, room: number): Line {
+  const size = guide.files.reduce((sum, file) => ({ additions: sum.additions + file.additions, deletions: sum.deletions + file.deletions }), { additions: 0, deletions: 0 });
+  const stats = guideStats(guide);
+  const facts: Array<Line | null> = [
+    [{ text: `${guide.files.length} files`, color: THEME.faint }],
+    [
+      { text: `+${size.additions.toLocaleString("en-US")}`, color: THEME.addition.sign },
+      { text: ` −${size.deletions.toLocaleString("en-US")}`, color: THEME.deletion.sign },
+    ],
+    stats && [{ text: stats.time, color: THEME.faint }],
+    stats?.tokens ? [{ text: stats.tokens, color: THEME.faint }] : null,
+    [{ text: guide.headSha.slice(0, 7), color: THEME.bright }],
+  ];
+  const join = (): Line => facts.filter((fact) => fact !== null).flatMap((fact, index) => [...(index > 0 ? [{ text: " · ", color: THEME.disabled }] : []), ...fact]);
+  for (const drop of [3, 2, 0, 1]) {
+    if (width(join()) <= room) break;
+    facts[drop] = null;
+  }
+  return join();
+}
 
 /** A key drawn as a keycap. */
 export const chip = (key: string): Span => ({ text: ` ${key} `, color: THEME.strong, bg: THEME.chip, bold: true });

@@ -16,8 +16,14 @@ export interface RunRequest<T> {
   readonly timeoutMs: number;
 }
 
+/** The agent's answer, and the tokens the run used when the harness reports them. */
+export interface RunResponse<T> {
+  readonly output: T;
+  readonly tokens: number | null;
+}
+
 /** One read-only agent run that must answer with JSON matching the schema. */
-export type Runner = <T>(request: RunRequest<T>) => Promise<T>;
+export type Runner = <T>(request: RunRequest<T>) => Promise<RunResponse<T>>;
 
 /** Structured-output APIs reject JSON Schema's integer bounds and the `$schema` key. */
 function jsonSchemaFor(schema: z.ZodType): object {
@@ -56,6 +62,14 @@ const ClaudeMessage = z.object({
   is_error: z.boolean().optional(),
   result: z.string().optional(),
   structured_output: z.unknown().optional(),
+  usage: z
+    .object({
+      input_tokens: z.number(),
+      output_tokens: z.number(),
+      cache_creation_input_tokens: z.number().optional(),
+      cache_read_input_tokens: z.number().optional(),
+    })
+    .optional(),
 });
 const ClaudeOutput = z.union([z.array(ClaudeMessage), ClaudeMessage]);
 
@@ -105,7 +119,11 @@ const runClaude: Runner = async ({ cwd, prompt, schema, choice, signal, timeoutM
     const detail = (message?.is_error ? message.result : undefined) ?? (result.stderr.trim() || result.stdout.trim());
     throw new CommandError(`Claude failed: ${detail || `exit code ${result.code}`}`);
   }
-  return decodeOutput("Claude", schema, message.structured_output);
+  const usage = message.usage;
+  const tokens = usage
+    ? usage.input_tokens + usage.output_tokens + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0)
+    : null;
+  return { output: decodeOutput("Claude", schema, message.structured_output), tokens };
 };
 
 // --- Codex ------------------------------------------------------------------
@@ -129,6 +147,12 @@ async function enabledCodexMcpServers(cwd: string, signal: AbortSignal): Promise
     if (signal.aborted) throw error;
     return [];
   }
+}
+
+/** Codex ends its log with `tokens used`, then the total on the next line, like `16,834`. */
+export function codexTokens(stderr: string): number | null {
+  const total = [...stderr.matchAll(/^tokens used\n([\d,]+)$/gm)].at(-1)?.[1];
+  return total === undefined ? null : Number(total.replaceAll(",", ""));
 }
 
 const runCodex: Runner = async ({ cwd, prompt, schema, choice, signal, timeoutMs }) => {
@@ -170,7 +194,7 @@ const runCodex: Runner = async ({ cwd, prompt, schema, choice, signal, timeoutMs
     }
     const output = await readFile(outputPath, "utf8");
     try {
-      return decodeOutput("Codex", schema, JSON.parse(output));
+      return { output: decodeOutput("Codex", schema, JSON.parse(output)), tokens: codexTokens(result.stderr) };
     } catch (error) {
       if (error instanceof SyntaxError) throw new CommandError("Codex did not return JSON.");
       throw error;
@@ -188,7 +212,11 @@ const runCodex: Runner = async ({ cwd, prompt, schema, choice, signal, timeoutMs
 // Passed per run, so the user's own agy settings neither loosen nor inherit any of this.
 const ANTIGRAVITY_SETTINGS = { toolPermission: "always-proceed", enableTerminalSandbox: true, allowNonWorkspaceAccess: false };
 
-const AntigravityOutput = z.object({ status: z.string(), structured_output: z.unknown().optional() });
+const AntigravityOutput = z.object({
+  status: z.string(),
+  structured_output: z.unknown().optional(),
+  usage: z.object({ total_tokens: z.number() }).optional(),
+});
 
 function parseAntigravityOutput(stdout: string) {
   try {
@@ -220,7 +248,7 @@ const runAntigravity: Runner = async ({ cwd, prompt, schema, choice, signal, tim
   if (result.code !== 0 || output?.status !== "SUCCESS" || output.structured_output === undefined) {
     throw new CommandError(`Antigravity failed: ${result.stderr.trim() || `exit code ${result.code}`}`);
   }
-  return decodeOutput("Antigravity", schema, output.structured_output);
+  return { output: decodeOutput("Antigravity", schema, output.structured_output), tokens: output.usage?.total_tokens ?? null };
 };
 
 // --- Which models the account can use -----------------------------------------

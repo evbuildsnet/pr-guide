@@ -1,4 +1,4 @@
-import type { Attention, Note, Stop } from "./model.ts";
+import type { Attention, Guide, Note, Stop } from "./model.ts";
 
 export const ATTENTION_LABELS = {
   tradeoff: "A tradeoff to weigh",
@@ -44,4 +44,18 @@ export function letterStopNotes(stop: Stop) {
     return lines;
   });
   return { lettered, byExcerpt };
+}
+
+const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+
+/** How writing went, as `prepared in 2m 14s` and `48.2K tokens`; null for guides written before stats were kept. */
+export function guideStats(guide: Guide): { readonly time: string; readonly tokens: string | null } | null {
+  if (guide.stats === undefined) return null;
+  const seconds = Math.round(guide.stats.durationMs / 1000);
+  const minutes = Math.floor(seconds / 60);
+  return {
+    time: `prepared in ${minutes > 0 ? `${minutes}m ${seconds % 60}s` : `${seconds}s`}`,
+    // A harness that reports nothing, or zero, shows no count rather than a misleading one.
+    tokens: guide.stats.tokens ? `${compact.format(guide.stats.tokens)} tokens` : null,
+  };
 }
