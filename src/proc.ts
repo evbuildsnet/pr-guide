@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { accessSync, constants, statSync } from "node:fs";
+import { delimiter, join } from "node:path";
 
 export interface RunOptions {
   readonly cwd?: string;
@@ -14,6 +16,19 @@ export interface RunResult {
 }
 
 export class CommandError extends Error {}
+
+/** Whether a command is installed, judged by PATH alone so nothing is run. */
+export function onPath(command: string): boolean {
+  return (process.env.PATH ?? "").split(delimiter).some((dir) => {
+    try {
+      const path = join(dir, command);
+      accessSync(path, constants.X_OK);
+      return statSync(path).isFile();
+    } catch {
+      return false;
+    }
+  });
+}
 
 export function run(
   command: string,

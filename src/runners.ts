@@ -180,4 +180,47 @@ const runCodex: Runner = async ({ cwd, prompt, schema, choice, signal, timeoutMs
   }
 };
 
-export const RUNNERS: Record<ProviderId, Runner> = { claude: runClaude, codex: runCodex };
+// --- Antigravity ------------------------------------------------------------
+
+// Headless agy stops the whole run at the first action that needs an approval, so nothing may ask.
+// Its terminal sandbox does the guarding instead: shell commands can read but cannot write to the
+// checkout or the home folder, and the file tools cannot leave the checkout, which is thrown away.
+// Passed per run, so the user's own agy settings neither loosen nor inherit any of this.
+const ANTIGRAVITY_SETTINGS = { toolPermission: "always-proceed", enableTerminalSandbox: true, allowNonWorkspaceAccess: false };
+
+const AntigravityOutput = z.object({ status: z.string(), structured_output: z.unknown().optional() });
+
+function parseAntigravityOutput(stdout: string) {
+  try {
+    return AntigravityOutput.safeParse(JSON.parse(stdout)).data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const runAntigravity: Runner = async ({ cwd, prompt, schema, choice, signal, timeoutMs }) => {
+  const result = await run(
+    "agy",
+    [
+      "--output-format",
+      "json",
+      "--json-schema",
+      JSON.stringify(jsonSchemaFor(schema)),
+      "--model",
+      choice.model,
+      "--effort",
+      choice.effort,
+      "--settings",
+      JSON.stringify(ANTIGRAVITY_SETTINGS),
+      "--disable-slash-commands",
+    ],
+    { cwd, input: prompt, signal, timeoutMs },
+  );
+  const output = parseAntigravityOutput(result.stdout);
+  if (result.code !== 0 || output?.status !== "SUCCESS" || output.structured_output === undefined) {
+    throw new CommandError(`Antigravity failed: ${result.stderr.trim() || `exit code ${result.code}`}`);
+  }
+  return decodeOutput("Antigravity", schema, output.structured_output);
+};
+
+export const RUNNERS: Record<ProviderId, Runner> = { claude: runClaude, codex: runCodex, antigravity: runAntigravity };
