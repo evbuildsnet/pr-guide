@@ -1,16 +1,17 @@
 import { describeChoice } from "./catalog.ts";
 import { excerptRows } from "./diff.ts";
 import type { Guide } from "./model.ts";
-import { ATTENTION_LABELS, letterStopNotes, otherFiles } from "./tour.ts";
+import { ATTENTION_LABELS, guideStats, letterStopNotes, otherFiles } from "./tour.ts";
 
 const SIGNS = { context: " ", addition: "+", deletion: "-" } as const;
 
 export function guideToMarkdown(guide: Guide): string {
   const files = new Map(guide.files.map((file) => [file.path, file]));
+  const stats = guideStats(guide);
   const out: Array<string> = [
     `# ${guide.pr.title} (#${guide.pr.number})`,
     "",
-    `${guide.pr.url} · head \`${guide.headSha.slice(0, 7)}\` · ${describeChoice(guide.choice)}`,
+    [guide.pr.url, `head \`${guide.headSha.slice(0, 7)}\``, describeChoice(guide.choice), stats?.time, stats?.tokens].filter(Boolean).join(" · "),
   ];
 
   guide.stops.forEach((stop, index) => {

@@ -7,7 +7,7 @@ import { readGuide, STAGES, writeGuide, type Stage } from "../guide.ts";
 import { loadPullRequest, type PullRequest } from "../host.ts";
 import type { Guide } from "../model.ts";
 import { activeChoice, loadSettings } from "../settings.ts";
-import { card, chip, MEASURE, THEME, type Line } from "./lines.ts";
+import { card, chip, headerFacts, MEASURE, THEME, type Line } from "./lines.ts";
 import { Settings } from "./Settings.tsx";
 import { Lines, Tour } from "./Tour.tsx";
 
@@ -25,6 +25,9 @@ export interface AppProps {
   readonly override: Partial<ModelChoice> | null;
   readonly rewrite: boolean;
 }
+
+/** The header keeps this much of the PR's name before it drops facts on the right. */
+const TITLE_MIN = 16;
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -108,11 +111,6 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
 
   const pr = screen.kind === "loading" ? null : screen.pr;
   const stale = screen.kind === "tour" && screen.guide.headSha !== screen.pr.headSha;
-  // The PR's size, as t3code shows it, once the guide has the diff.
-  const size =
-    screen.kind === "tour"
-      ? screen.guide.files.reduce((sum, file) => ({ files: sum.files + 1, additions: sum.additions + file.additions, deletions: sum.deletions + file.deletions }), { files: 0, additions: 0, deletions: 0 })
-      : null;
   const header = (
     <Box paddingX={1}>
       <Box flexGrow={1} flexShrink={1}>
@@ -127,13 +125,9 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
         )}
       </Text>
       </Box>
-      {size ? (
+      {screen.kind === "tour" ? (
         <Box flexShrink={0} marginLeft={2}>
-          <Text>
-            <Text color={THEME.faint}>{`${size.files} files  `}</Text>
-            <Text color={THEME.addition.sign}>{`+${size.additions.toLocaleString("en-US")}`}</Text>
-            <Text color={THEME.deletion.sign}>{` −${size.deletions.toLocaleString("en-US")}`}</Text>
-          </Text>
+          <Lines lines={[headerFacts(screen.guide, columns - 4 - TITLE_MIN)]} />
         </Box>
       ) : null}
     </Box>

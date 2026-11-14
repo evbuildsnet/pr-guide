@@ -45,6 +45,7 @@ export function writeGuide(pr: PullRequest, choice: ModelChoice, options: WriteO
 }
 
 async function write(pr: PullRequest, choice: ModelChoice, options: WriteOptions & { signal: AbortSignal }): Promise<Guide> {
+  const started = Date.now();
   options.onStage("checkout");
   const checkout = await checkoutPullRequest(pr, options.cwd, options.signal);
   try {
@@ -58,7 +59,7 @@ async function write(pr: PullRequest, choice: ModelChoice, options: WriteOptions
     const files = parseDiff(names.split("\0").filter((path) => path !== ""), patch);
 
     options.onStage("writing");
-    const output = await RUNNERS[choice.provider]({
+    const { output, tokens } = await RUNNERS[choice.provider]({
       cwd: checkout.path,
       prompt: buildGuidePrompt({
         number: pr.number,
@@ -81,6 +82,7 @@ async function write(pr: PullRequest, choice: ModelChoice, options: WriteOptions
       baseSha: checkout.baseSha,
       generatedAt: new Date().toISOString(),
       choice,
+      stats: { durationMs: Date.now() - started, tokens },
       stops: normalizeGuide(output, files),
       files,
     };

@@ -84,6 +84,8 @@ export const Guide = z.object({
     effort: z.enum(EFFORTS),
     tier: z.enum(TIERS),
   }),
+  /** How writing went: wall-clock time from start to ready, and the agent's tokens if its CLI said. Older guides have none. */
+  stats: z.object({ durationMs: z.int(), tokens: z.nullable(z.int()) }).optional(),
   stops: z.array(Stop),
   files: z.array(DiffFile),
 });
