@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import {
   EFFORTS,
+  effortsFor,
   PROVIDERS,
   PROVIDER_IDS,
   TIERS,
@@ -25,6 +26,8 @@ const Settings = z.object({
   provider: z.enum(PROVIDER_IDS),
   claude: ProviderChoice,
   codex: ProviderChoice,
+  // Settings saved before Antigravity existed have no entry for it.
+  antigravity: ProviderChoice.default(PROVIDERS.antigravity.defaults),
 });
 export type Settings = z.infer<typeof Settings>;
 
@@ -32,6 +35,7 @@ export const DEFAULT_SETTINGS: Settings = {
   provider: "claude",
   claude: PROVIDERS.claude.defaults,
   codex: PROVIDERS.codex.defaults,
+  antigravity: PROVIDERS.antigravity.defaults,
 };
 
 const configDir = join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "pr-guide");
@@ -51,11 +55,16 @@ export function saveSettings(settings: Settings): void {
   writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
 }
 
-/** Keeps a choice inside the catalog: unknown models reset to the provider default, tiers to standard. */
+/**
+ * Keeps a choice inside the catalog: unknown models reset to the provider default, tiers to
+ * standard, and a reasoning level the model lacks to the highest one it offers.
+ */
 export function sanitizeChoice(provider: ProviderId, choice: ProviderChoice): ModelChoice {
   const model = findModel(provider, choice.model) ? choice.model : PROVIDERS[provider].defaults.model;
   const tier = tiersFor({ provider, model }).includes(choice.tier) ? choice.tier : "standard";
-  return { provider, model, effort: choice.effort, tier };
+  const efforts = effortsFor({ provider, model });
+  const effort = efforts.includes(choice.effort) ? choice.effort : (efforts.at(-1) ?? choice.effort);
+  return { provider, model, effort, tier };
 }
 
 export function activeChoice(settings: Settings): ModelChoice {

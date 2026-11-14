@@ -180,6 +180,7 @@ export function App({ target, cwd, override, rewrite }: AppProps) {
         <Settings
           settings={settings}
           written={screen.kind === "tour" ? screen.guide.choice : null}
+          height={rows - 2}
           onChange={(next) => {
             setSettings(next);
             setRunOverride(null);

@@ -2,14 +2,14 @@
 import { render } from "ink";
 import { parseArgs } from "node:util";
 
-import { EFFORTS, PROVIDERS, PROVIDER_IDS, TIERS, describeChoice, findModel, tiersFor, type ModelChoice } from "./catalog.ts";
+import { EFFORTS, PROVIDERS, PROVIDER_IDS, TIERS, describeChoice, effortsFor, findModel, tiersFor, type ModelChoice } from "./catalog.ts";
 import { readGuide, STAGES, stopWriting, writeGuide } from "./guide.ts";
 import { loadPullRequest } from "./host.ts";
 import { guideToMarkdown } from "./markdown.ts";
 import { activeChoice, loadSettings } from "./settings.ts";
 import { App } from "./tui/App.tsx";
 
-const HELP = `pr-guide: a guided tour of a pull request, written by your own Claude or Codex.
+const HELP = `pr-guide: a guided tour of a pull request, written by your own Claude, Codex or Gemini.
 
 Usage
   pr-guide [pr]            pr is a number, URL or branch; empty means the current branch's PR
@@ -23,12 +23,12 @@ Options
   --rewrite                write a new guide even if one is saved for this PR
   --provider <id>          ${PROVIDER_IDS.join(" | ")}
   --model <slug>           ${PROVIDER_IDS.map((id) => PROVIDERS[id].models.map((model) => model.slug).join(", ")).join("; ")}
-  --effort <level>         ${EFFORTS.join(" | ")}
+  --effort <level>         ${EFFORTS.join(" | ")} (where the model offers it)
   --tier <speed>           ${TIERS.join(" | ")} (where the model offers it)
   -h, --help
 
 Model flags apply to this run only; press s in the tour to change saved settings.
-Needs gh (GitHub) or glab (GitLab) and the claude or codex CLI, each logged in.`;
+Needs gh (GitHub) or glab (GitLab) and the claude, codex or agy CLI, each logged in.`;
 
 function fail(message: string): never {
   process.stderr.write(`pr-guide: ${message}\n`);
@@ -51,7 +51,8 @@ function resolveOverride(flags: { provider?: string; model?: string; effort?: st
   const base = provider === saved.provider ? saved : { ...PROVIDERS[provider].defaults, provider };
   const model = flags.model ?? base.model;
   if (!findModel(provider, model)) fail(`${model} is not a ${PROVIDERS[provider].label} model`);
-  const effort = flags.effort ? oneOf(EFFORTS, flags.effort, "effort") : base.effort;
+  const efforts = effortsFor({ provider, model });
+  const effort = flags.effort ? oneOf(efforts, flags.effort, "effort") : efforts.includes(base.effort) ? base.effort : (efforts.at(-1) ?? base.effort);
   const tiers = tiersFor({ provider, model });
   const tier = flags.tier ? oneOf(tiers, flags.tier, "tier") : tiers.includes(base.tier) ? base.tier : "standard";
   return { provider, model, effort, tier };

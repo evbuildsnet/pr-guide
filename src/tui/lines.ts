@@ -66,8 +66,8 @@ const BLANK: Line = [];
 /** Drawn in the gutter of a wrapped code row's continuation. */
 export const CONTINUATION = " ↪";
 export const isContinuation = (line: Line) => line.some((span) => span.cont === true);
-const width = (line: Line) => line.reduce((sum, span) => sum + span.text.length, 0);
-const pad = (line: Line, to: number, bg?: string): Line => [...line, { text: " ".repeat(Math.max(to - width(line), 0)), bg }];
+export const width = (line: Line) => line.reduce((sum, span) => sum + span.text.length, 0);
+export const pad = (line: Line, to: number, bg?: string): Line => [...line, { text: " ".repeat(Math.max(to - width(line), 0)), bg }];
 const withBg = (line: Line, bg: string): Line => line.map((span) => ({ ...span, bg: span.bg ?? bg }));
 
 /** A key drawn as a keycap. */

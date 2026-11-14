@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import type { ModelChoice, ProviderId } from "./catalog.ts";
-import { CommandError, run } from "./proc.ts";
+import { CommandError, run, runOk, type RunOptions } from "./proc.ts";
 
 export interface RunRequest<T> {
   readonly cwd: string;
@@ -180,4 +180,76 @@ const runCodex: Runner = async ({ cwd, prompt, schema, choice, signal, timeoutMs
   }
 };
 
-export const RUNNERS: Record<ProviderId, Runner> = { claude: runClaude, codex: runCodex };
+// --- Antigravity ------------------------------------------------------------
+
+// Headless agy stops the whole run at the first action that needs an approval, so nothing may ask.
+// Its terminal sandbox does the guarding instead: shell commands can read but cannot write to the
+// checkout or the home folder, and the file tools cannot leave the checkout, which is thrown away.
+// Passed per run, so the user's own agy settings neither loosen nor inherit any of this.
+const ANTIGRAVITY_SETTINGS = { toolPermission: "always-proceed", enableTerminalSandbox: true, allowNonWorkspaceAccess: false };
+
+const AntigravityOutput = z.object({ status: z.string(), structured_output: z.unknown().optional() });
+
+function parseAntigravityOutput(stdout: string) {
+  try {
+    return AntigravityOutput.safeParse(JSON.parse(stdout)).data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const runAntigravity: Runner = async ({ cwd, prompt, schema, choice, signal, timeoutMs }) => {
+  const result = await run(
+    "agy",
+    [
+      "--output-format",
+      "json",
+      "--json-schema",
+      JSON.stringify(jsonSchemaFor(schema)),
+      "--model",
+      choice.model,
+      "--effort",
+      choice.effort,
+      "--settings",
+      JSON.stringify(ANTIGRAVITY_SETTINGS),
+      "--disable-slash-commands",
+    ],
+    { cwd, input: prompt, signal, timeoutMs },
+  );
+  const output = parseAntigravityOutput(result.stdout);
+  if (result.code !== 0 || output?.status !== "SUCCESS" || output.structured_output === undefined) {
+    throw new CommandError(`Antigravity failed: ${result.stderr.trim() || `exit code ${result.code}`}`);
+  }
+  return decodeOutput("Antigravity", schema, output.structured_output);
+};
+
+// --- Which models the account can use -----------------------------------------
+
+const CodexCatalog = z.object({ models: z.array(z.object({ slug: z.string() })) });
+
+/** `agy models` prints one id per reasoning level, like `gemini-3.8-flash-high`, a tab, then its name. */
+export const antigravityModels = (stdout: string): Array<string> =>
+  stdout.split("\n").flatMap((line) => (line.includes("\t") ? [line.slice(0, line.indexOf("\t")).replace(/-(low|medium|high|xhigh|max)$/, "")] : []));
+
+const LISTERS: Record<ProviderId, ((options: RunOptions) => Promise<Array<string>>) | null> = {
+  // Claude Code has no command that lists them.
+  claude: null,
+  codex: async (options) => CodexCatalog.parse(JSON.parse(await runOk("codex", ["debug", "models"], options))).models.map((model) => model.slug),
+  antigravity: async (options) => antigravityModels(await runOk("agy", ["models"], options)),
+};
+
+const listed = new Map<ProviderId, Promise<ReadonlySet<string> | null>>();
+
+/**
+ * The models a harness offers this account, asked of its CLI once per run. Null when the CLI
+ * can't say or the question fails, and then every model in the catalog counts as available.
+ */
+export function availableModels(provider: ProviderId): Promise<ReadonlySet<string> | null> {
+  const lister = LISTERS[provider];
+  if (lister === null) return Promise.resolve(null);
+  const asked = listed.get(provider) ?? lister({ timeoutMs: 15_000 }).then((slugs) => (slugs.length > 0 ? new Set(slugs) : null), () => null);
+  listed.set(provider, asked);
+  return asked;
+}
+
+export const RUNNERS: Record<ProviderId, Runner> = { claude: runClaude, codex: runCodex, antigravity: runAntigravity };
