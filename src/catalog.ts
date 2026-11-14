@@ -57,6 +57,7 @@ export const PROVIDERS = {
     label: "Antigravity",
     cli: "agy",
     models: [
+      { slug: "gemini-4-hydrogen", label: "Gemini 4 Hydrogen", tiers: ["standard"] },
       { slug: "gemini-4-carbon", label: "Gemini 4 Carbon", tiers: ["standard"], efforts: ["low", "medium", "high"] },
       { slug: "gemini-3.1-pro", label: "Gemini 3.1 Pro", tiers: ["standard"], efforts: ["low", "high"] },
       { slug: "gemini-3.8-flash", label: "Gemini 3.8 Flash", tiers: ["standard"], efforts: ["low", "medium", "high"] },
