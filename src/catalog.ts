@@ -48,10 +48,10 @@ export const PROVIDERS = {
     label: "Codex",
     cli: "codex",
     models: [
-      { slug: "gpt-6.1-sol", label: "GPT-6.1 Sol", tiers: ["standard", "fast", "ultrafast"] },
-      { slug: "gpt-6-astra", label: "GPT-6 Astra", tiers: ["standard", "fast", "ultrafast"] },
+      { slug: "gpt-6.2-sol", label: "GPT-6.2 Sol", tiers: ["standard", "fast", "ultrafast"] },
+      { slug: "gpt-6.2-astra", label: "GPT-6.2 Astra", tiers: ["standard", "fast", "ultrafast"] },
     ],
-    defaults: { model: "gpt-6.1-sol", effort: "high", tier: "standard" },
+    defaults: { model: "gpt-6.2-sol", effort: "high", tier: "standard" },
   },
   antigravity: {
     label: "Antigravity",

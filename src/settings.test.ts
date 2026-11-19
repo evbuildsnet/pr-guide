@@ -12,14 +12,14 @@ test("a reasoning level the model lacks becomes the highest one it offers", () =
   assert.equal(sanitizeChoice("antigravity", choice).effort, "high");
   assert.equal(sanitizeChoice("antigravity", { ...choice, model: "gemini-3.8-flash", effort: "xhigh" }).effort, "high");
   assert.equal(sanitizeChoice("antigravity", { ...choice, model: "gemini-3.8-flash" }).effort, "medium");
-  assert.equal(sanitizeChoice("codex", { ...choice, model: "gpt-6.1-sol", effort: "xhigh" }).effort, "xhigh");
+  assert.equal(sanitizeChoice("codex", { ...choice, model: "gpt-6.2-sol", effort: "xhigh" }).effort, "xhigh");
 });
 
 test("settings saved before Antigravity existed keep their choices", () => {
   const saved = {
     provider: "codex",
     claude: { model: "claude-haiku-5-5", effort: "low", tier: "standard" },
-    codex: { model: "gpt-6-astra", effort: "medium", tier: "fast" },
+    codex: { model: "gpt-6.2-astra", effort: "medium", tier: "fast" },
   };
   mkdirSync(dirname(settingsPath), { recursive: true });
   writeFileSync(settingsPath, JSON.stringify(saved));
